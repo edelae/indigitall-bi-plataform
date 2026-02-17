@@ -5,24 +5,26 @@ This is the core interaction page: user asks questions in the chat panel,
 AI processes them, results appear in the right panel with table + chart.
 """
 
-import json
-from datetime import datetime
-
 import pandas as pd
 from dash import (
     Input, Output, State, callback, html, dcc, no_update, ctx,
-    ALL, MATCH,
+    ALL,
 )
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 import plotly.express as px
 
 from app.services.data_service import DataService
+from app.services.ai_agent import AIAgent
 from app.services.storage_service import StorageService
 from app.config import settings
 
 # Chart color sequence from design system
 CHART_COLORS = ["#1E88E5", "#76C043", "#A0A3BD", "#42A5F5", "#1565C0", "#FFC107", "#9C27B0", "#FF5722"]
+
+# Singleton-ish agent (created once per worker process)
+_data_service = DataService()
+_agent = AIAgent(_data_service)
 
 
 def _render_user_message(text):
@@ -35,7 +37,7 @@ def _render_assistant_message(text):
     return html.Div([
         html.Div([
             html.I(className="bi bi-robot me-2"),
-            html.Span(text),
+            dcc.Markdown(text, className="d-inline"),
         ], className="chat-message assistant-msg"),
     ], className="mb-3")
 
@@ -48,7 +50,16 @@ def _auto_chart(df, chart_type=None):
     x_col = df.columns[0]
     y_col = df.columns[1]
 
-    # Heuristic: if x looks like a date, use line chart
+    # Try to make y numeric for charting
+    if df[y_col].dtype == "object":
+        try:
+            df = df.copy()
+            df[y_col] = pd.to_numeric(df[y_col].str.replace(",", "").str.replace("%", ""), errors="coerce")
+        except Exception:
+            return None
+        if df[y_col].isna().all():
+            return None
+
     if chart_type == "line" or "date" in x_col.lower() or "fecha" in x_col.lower():
         fig = px.line(df, x=x_col, y=y_col, color_discrete_sequence=CHART_COLORS)
     elif chart_type == "pie" or len(df) <= 8:
@@ -65,79 +76,6 @@ def _auto_chart(df, chart_type=None):
         height=350,
     )
     return fig
-
-
-def _process_query(query_text, tenant, chat_history):
-    """
-    Process a user query using the demo pre-built functions.
-    In Phase 4, this will be replaced by the AI agent (Claude Sonnet).
-    """
-    svc = DataService()
-    query_lower = query_text.lower()
-
-    # Simple keyword matching for demo (will be replaced by AI agent)
-    if any(w in query_lower for w in ["resumen", "summary", "general", "estadisticas"]):
-        stats = svc.get_summary_stats(tenant)
-        df = pd.DataFrame([stats])
-        explanation = (
-            f"Total de mensajes: {stats['total_messages']:,}, "
-            f"Contactos unicos: {stats['unique_contacts']:,}, "
-            f"Agentes activos: {stats['active_agents']:,}, "
-            f"Conversaciones: {stats['total_conversations']:,}."
-        )
-        return explanation, df, "summary", None
-
-    elif any(w in query_lower for w in ["fallback", "tasa"]):
-        result = svc.get_fallback_rate(tenant)
-        df = pd.DataFrame([{"Metrica": "Tasa de Fallback", "Valor": f"{result['rate']}%",
-                            "Fallbacks": result["fallback_count"], "Total": result["total"]}])
-        explanation = f"La tasa de fallback es {result['rate']}% ({result['fallback_count']} de {result['total']} mensajes)."
-        return explanation, df, "fallback_rate", None
-
-    elif any(w in query_lower for w in ["hora", "hour", "horario"]):
-        df = svc.get_messages_by_hour(tenant)
-        return "Distribucion de mensajes por hora del dia:", df, "messages_by_hour", "bar"
-
-    elif any(w in query_lower for w in ["direction", "direccion", "canal", "tipo"]):
-        df = svc.get_messages_by_direction(tenant)
-        return "Distribucion de mensajes por direccion:", df, "messages_by_direction", "pie"
-
-    elif any(w in query_lower for w in ["tendencia", "tiempo", "trend", "over time"]):
-        df = svc.get_messages_over_time(tenant)
-        return "Tendencia de mensajes en el tiempo:", df, "messages_over_time", "line"
-
-    elif any(w in query_lower for w in ["contacto", "contact", "top", "activo"]):
-        df = svc.get_top_contacts(tenant, limit=10)
-        return "Top 10 contactos mas activos:", df, "top_contacts", "bar"
-
-    elif any(w in query_lower for w in ["intent", "intencion", "distribucion"]):
-        df = svc.get_intent_distribution(tenant, limit=10)
-        return "Distribucion de las principales intenciones:", df, "intent_distribution", "bar"
-
-    elif any(w in query_lower for w in ["agente", "agent", "rendimiento", "performance"]):
-        df = svc.get_agent_performance(tenant)
-        return "Rendimiento de agentes:", df, "agent_performance", "bar"
-
-    elif any(w in query_lower for w in ["dia", "semana", "day", "week"]):
-        df = svc.get_messages_by_day_of_week(tenant)
-        return "Mensajes por dia de la semana:", df, "messages_by_day_of_week", "bar"
-
-    elif any(w in query_lower for w in ["comparacion", "entidad", "entity", "cooperativa"]):
-        # Entity comparison — get messages grouped by tenant
-        df = svc.get_messages_dataframe(tenant)
-        if not df.empty and "tenant_id" in df.columns:
-            comparison = df.groupby("tenant_id").size().reset_index(name="count")
-            return "Comparacion entre entidades:", comparison, "entity_comparison", "bar"
-        return "No hay datos suficientes para comparar entidades.", pd.DataFrame(), None, None
-
-    else:
-        return (
-            "No reconozco esa consulta. Intenta preguntar sobre: resumen, fallback, "
-            "mensajes por hora, tendencia, contactos, intenciones, agentes, o comparacion de entidades.",
-            pd.DataFrame(),
-            None,
-            None,
-        )
 
 
 # --- Main chat callback ---
@@ -163,13 +101,27 @@ def send_message(n_clicks, n_submit, message, tenant, history):
 
     history = history or []
 
-    # Add user message
+    # Add user message to history
     history.append({"role": "user", "content": message})
 
-    # Process query
-    explanation, df, ai_function, chart_type = _process_query(message, tenant, history)
+    # Process query via AI agent (or demo mode fallback)
+    result = _agent.process_query(
+        user_question=message,
+        conversation_history=history,
+        tenant_filter=tenant,
+    )
 
-    # Add assistant response
+    explanation = result.get("response", "")
+    df = result.get("data") if result.get("data") is not None else pd.DataFrame()
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame()
+    chart_type = result.get("chart_type")
+    ai_function = None
+    query_details = result.get("query_details")
+    if query_details:
+        ai_function = query_details.get("function")
+
+    # Add assistant response to history (serialize-safe for dcc.Store)
     assistant_entry = {
         "role": "assistant",
         "content": explanation,
@@ -224,6 +176,20 @@ def send_message(n_clicks, n_submit, message, tenant, history):
         )
 
         results.append(html.Small(f"{len(df)} filas", className="text-muted mt-2 d-block"))
+
+        # Show SQL details if it was an ad-hoc query
+        if query_details and query_details.get("sql"):
+            results.append(
+                dbc.Accordion([
+                    dbc.AccordionItem(
+                        html.Pre(
+                            query_details["sql"],
+                            className="bg-light p-3 rounded small",
+                        ),
+                        title="Ver SQL generado",
+                    ),
+                ], start_collapsed=True, className="mt-2")
+            )
     else:
         results.append(html.Div([
             html.I(className="bi bi-info-circle display-4 text-muted"),
@@ -259,7 +225,6 @@ def click_suggestion(chip_clicks, current_n):
     if not any(chip_clicks):
         raise PreventUpdate
 
-    # Find which chip was clicked
     triggered = ctx.triggered_id
     if triggered and isinstance(triggered, dict):
         idx = triggered["index"]
