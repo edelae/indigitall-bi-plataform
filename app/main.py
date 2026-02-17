@@ -38,6 +38,16 @@ app = dash.Dash(
 server = app.server
 server.secret_key = settings.FLASK_SECRET_KEY
 
+# --- Auth middleware ---
+from app.middleware.auth import init_auth
+init_auth(server, settings)
+
+
+# --- Health check endpoint ---
+@server.route("/health")
+def health():
+    return {"status": "ok", "auth_mode": settings.AUTH_MODE}
+
 
 # --- Navbar ---
 def create_navbar():

@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Default tenant for dev mode (no JWT)
     DEFAULT_TENANT: str = "demo"
 
+    # Auth mode: "dev" (no auth, query-param tenant) or "jwt" (indigitall JWT)
+    AUTH_MODE: str = "dev"
+
+    # JWT settings (used when AUTH_MODE=jwt)
+    JWT_SECRET_KEY: str = "change-me-jwt-secret"
+    JWT_COOKIE_NAME: str = "indigitall_token"
+
     @property
     def has_ai_key(self) -> bool:
         return bool(self.ANTHROPIC_API_KEY) and self.ANTHROPIC_API_KEY != "sk-ant-your-key-here"
