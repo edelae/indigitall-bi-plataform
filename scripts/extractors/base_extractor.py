@@ -31,7 +31,7 @@ class BaseExtractor(ABC):
         """Run extraction for all given applications. Returns total records stored."""
         self.records_stored = 0
         for app in applications:
-            app_id = app.get("appKey") or app.get("id") or app.get("applicationId", "unknown")
+            app_id = app.get("id") or app.get("appKey") or app.get("applicationId", "unknown")
             app_name = app.get("name", "unknown")
             print(f"  [{self.CHANNEL_NAME}] App {app_name} ({app_id})")
             try:

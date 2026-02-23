@@ -33,8 +33,12 @@ def main():
     print("=" * 60)
 
     # ----- Validate credentials -----
-    if not cfg.INDIGITALL_EMAIL or not cfg.INDIGITALL_PASSWORD:
-        print("\n[ERROR] INDIGITALL_EMAIL and INDIGITALL_PASSWORD must be set in .env")
+    has_server_key = bool(cfg.INDIGITALL_SERVER_KEY)
+    has_jwt_creds = cfg.INDIGITALL_EMAIL and cfg.INDIGITALL_PASSWORD
+    if not has_server_key and not has_jwt_creds:
+        print("\n[ERROR] Set INDIGITALL_SERVER_KEY (ServerKey auth)")
+        print("        or INDIGITALL_EMAIL + INDIGITALL_PASSWORD (JWT auth)")
+        print("        in .env")
         sys.exit(1)
 
     start_time = time.time()

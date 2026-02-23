@@ -1,0 +1,31 @@
+{
+  "statusCode": 200,
+  "message": "OK",
+  "count": 1,
+  "data": [
+    {
+      "id": 100274,
+      "name": "VISIONAMOS PROD",
+      "campaigns": {
+        "sent": 0,
+        "scheduled": 0,
+        "welcome": 0,
+        "fidelity": 0,
+        "goefencing": 0,
+        "network": 0
+      },
+      "devices": {
+        "android": 0,
+        "ios": 0,
+        "webpush": 0,
+        "safari": 0
+      },
+      "impacts": {
+        "total": 0,
+        "today": 0,
+        "lastWeek": 0,
+        "lastMonth": 0
+      }
+    }
+  ]
+}

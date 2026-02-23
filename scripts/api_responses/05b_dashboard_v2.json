@@ -1,0 +1,4 @@
+{
+  "statusCode": 400,
+  "message": "One or both dates are invalid"
+}

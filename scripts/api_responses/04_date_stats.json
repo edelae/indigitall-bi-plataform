@@ -1,0 +1,198 @@
+{
+  "statusCode": 200,
+  "message": "OK",
+  "data": [
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-16",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-16",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-16",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-17",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-17",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-17",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-18",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-18",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-18",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-19",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-19",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-19",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-20",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-20",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-20",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-21",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-21",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-21",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-22",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-22",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-22",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-23",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-23",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-23",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    }
+  ]
+}

@@ -11,7 +11,9 @@ class ExtractionSettings(BaseSettings):
     )
 
     # Indigitall API
-    INDIGITALL_API_BASE_URL: str = "https://api.indigitall.com"
+    INDIGITALL_API_BASE_URL: str = "https://am1.api.indigitall.com"
+    INDIGITALL_SERVER_KEY: str = ""
+    INDIGITALL_APP_TOKEN: str = ""
     INDIGITALL_EMAIL: str = ""
     INDIGITALL_PASSWORD: str = ""
 

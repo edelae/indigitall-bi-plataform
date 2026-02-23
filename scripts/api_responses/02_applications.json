@@ -1,0 +1,24 @@
+{
+  "statusCode": 200,
+  "message": "OK",
+  "count": 1,
+  "data": [
+    {
+      "id": 100274,
+      "createdAt": "2025-04-14T17:07:22.876Z",
+      "name": "VISIONAMOS PROD",
+      "logoFile": "https://storage.googleapis.com/am1-account-service-public/apps/100274/images/APP100274-b9d6a5e49aab0be4.jpg",
+      "monochromeLogoFile": null,
+      "monochromeLogoColor": null,
+      "publicKey": "ec3521b6-49c6-41dc-8f54-a7be791ad95a",
+      "androidEnabled": false,
+      "iosEnabled": false,
+      "webpushEnabled": false,
+      "safariEnabled": false,
+      "harmonyEnabled": false,
+      "deleteDevicesConfiguration": {},
+      "pushLocationEnabled": false,
+      "chatEnabled": true
+    }
+  ]
+}
