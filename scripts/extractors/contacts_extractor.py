@@ -22,8 +22,9 @@ class ContactsExtractor(BaseExtractor):
     def _extract_for_app(self, app_id: str, app_meta: dict):
         page_size = min(cfg.EXTRACTION_MAX_RECORDS, 100)
 
-        # 1. Chat contacts (paginated — uses limit+offset)
-        offset = 0
+        # 1. Chat contacts (paginated — uses limit+page, NOT offset)
+        #    The Indigitall API ignores the offset parameter for /v1/chat/contacts.
+        #    Page numbers are 0-indexed.
         total = 0
         for page_num in range(self.MAX_PAGES):
             try:
@@ -32,7 +33,7 @@ class ContactsExtractor(BaseExtractor):
                     params={
                         "applicationId": app_id,
                         "limit": page_size,
-                        "offset": offset,
+                        "page": page_num,
                     },
                     application_id=app_id,
                 )
@@ -49,13 +50,11 @@ class ContactsExtractor(BaseExtractor):
                 if len(contacts) < page_size:
                     break
 
-                offset += page_size
-
             except Exception as exc:
                 print(f"    contacts page {page_num}: FAILED ({exc})")
                 break
 
-        print(f"    contacts: {total} records")
+        print(f"    contacts: {total} records across {page_num + 1} page(s)")
 
         # 2. Agent status
         try:

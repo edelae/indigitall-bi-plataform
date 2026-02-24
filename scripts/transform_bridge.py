@@ -431,16 +431,26 @@ def transform_campaigns(conn) -> int:
 # ---------------------------------------------------------------------------
 
 DAILY_STATS_SQL = """
+WITH raw_dates AS (
+    SELECT
+        coalesce(tenant_id, :tid) AS tenant_id,
+        elem->>'statsDate' AS stats_date
+    FROM raw.raw_push_stats,
+         jsonb_array_elements(source_data->'data') AS elem
+    WHERE endpoint LIKE '%%/dateStats%%'
+      AND source_data->'data' IS NOT NULL
+      AND jsonb_typeof(source_data->'data') = 'array'
+      AND elem->>'statsDate' IS NOT NULL
+)
 SELECT
     tenant_id,
-    date,
-    coalesce(sum(enviados), 0)   AS total_messages,
-    0                            AS unique_contacts,
-    0                            AS conversations,
-    0                            AS fallback_count
-FROM public.toques_daily
-WHERE tenant_id = :tid
-GROUP BY tenant_id, date
+    stats_date::date AS date,
+    0 AS total_messages,
+    0 AS unique_contacts,
+    0 AS conversations,
+    0 AS fallback_count
+FROM raw_dates
+GROUP BY tenant_id, stats_date::date
 """
 
 DAILY_STATS_UPSERT = """
@@ -473,15 +483,37 @@ def transform_daily_stats(conn) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Post-transform: update daily_stats totals from toques_daily
+# ---------------------------------------------------------------------------
+
+DAILY_STATS_UPDATE_TOTALS = """
+UPDATE public.daily_stats ds SET
+    total_messages = sub.total_enviados
+FROM (
+    SELECT tenant_id, date, coalesce(sum(enviados), 0) AS total_enviados
+    FROM public.toques_daily
+    WHERE tenant_id = :tid
+    GROUP BY tenant_id, date
+) sub
+WHERE ds.tenant_id = sub.tenant_id AND ds.date = sub.date
+"""
+
+
+def update_daily_stats_totals(conn) -> int:
+    result = conn.execute(text(DAILY_STATS_UPDATE_TOTALS), {"tid": TENANT_ID})
+    return result.rowcount
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 TRANSFORMS = [
     ("contacts",       transform_contacts),
+    ("daily_stats",    transform_daily_stats),    # must run BEFORE toques_daily (FK dependency)
     ("toques_daily",   transform_toques_daily),
     ("toques_heatmap", transform_heatmap),
     ("campaigns",      transform_campaigns),
-    ("daily_stats",    transform_daily_stats),
 ]
 
 
@@ -509,6 +541,15 @@ def main():
                     update_sync_state(conn, entity, 0, f"error: {str(exc)[:200]}")
             except Exception:
                 pass
+
+    # Post-transform: update daily_stats with aggregated totals from toques_daily
+    print(f"\n  [daily_stats] Updating totals from toques_daily...")
+    try:
+        with engine.begin() as conn:
+            updated = update_daily_stats_totals(conn)
+        print(f"    {updated} rows updated")
+    except Exception as exc:
+        print(f"    [ERROR] {exc}")
 
     elapsed = time.time() - start
 

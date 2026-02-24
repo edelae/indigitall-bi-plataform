@@ -20,10 +20,10 @@ class ExtractionSettings(BaseSettings):
     # Database (needed by app.models.database)
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/postgres"
 
-    # Extraction limits — keep small for Phase 1 discovery
-    EXTRACTION_DAYS_BACK: int = 7
-    EXTRACTION_PAGE_LIMIT: int = 1
-    EXTRACTION_MAX_RECORDS: int = 100
+    # Extraction limits
+    EXTRACTION_DAYS_BACK: int = 90
+    EXTRACTION_PAGE_LIMIT: int = 50
+    EXTRACTION_MAX_RECORDS: int = 100  # page size (API max per request)
 
     # Rate-limiting / resilience
     API_REQUEST_DELAY_SECONDS: float = 0.5

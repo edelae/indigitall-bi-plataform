@@ -35,9 +35,10 @@ class ChatExtractor(BaseExtractor):
         except Exception as exc:
             print(f"    agent/status: FAILED ({exc})")
 
-        # 2. Chat contacts (paginated — uses limit+offset)
+        # 2. Chat contacts (paginated — uses limit+page, NOT offset)
+        #    The Indigitall API ignores the offset parameter for /v1/chat/contacts.
+        #    Page numbers are 0-indexed.
         page_size = min(cfg.EXTRACTION_MAX_RECORDS, 100)
-        offset = 0
         total_contacts = 0
 
         for page_num in range(self.MAX_PAGES):
@@ -47,7 +48,7 @@ class ChatExtractor(BaseExtractor):
                     params={
                         "applicationId": app_id,
                         "limit": page_size,
-                        "offset": offset,
+                        "page": page_num,
                     },
                     application_id=app_id,
                 )
@@ -64,8 +65,6 @@ class ChatExtractor(BaseExtractor):
                 # Stop if we got fewer than page_size (last page)
                 if len(contacts) < page_size:
                     break
-
-                offset += page_size
 
             except Exception as exc:
                 print(f"    contacts page {page_num}: FAILED ({exc})")
