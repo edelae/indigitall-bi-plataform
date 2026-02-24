@@ -1,0 +1,262 @@
+// ═══════════════════════════════════════════════════════════
+// inDigitall BI Platform — Database Schema
+// Paste this into https://dbdiagram.io/
+// ═══════════════════════════════════════════════════════════
+
+// ── Conversations Domain ──
+
+Table contacts {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  contact_id varchar(100) [not null]
+  contact_name varchar(255)
+  total_messages integer [not null, default: 0]
+  first_contact date
+  last_contact date
+  total_conversations integer [not null, default: 0]
+
+  indexes {
+    (tenant_id, contact_id) [unique, name: 'uq_contacts_tenant_cid']
+  }
+}
+
+Table agents {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  agent_id varchar(100) [not null]
+  total_messages integer [not null, default: 0]
+  conversations_handled integer [not null, default: 0]
+  avg_handle_time_seconds integer
+
+  indexes {
+    (tenant_id, agent_id) [unique, name: 'uq_agents_tenant_aid']
+  }
+}
+
+Table messages {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  message_id varchar(100) [not null]
+  timestamp timestamptz [not null]
+  date date [not null]
+  hour smallint [not null]
+  day_of_week varchar(10) [not null]
+  send_type varchar(30)
+  direction varchar(20) [not null]
+  content_type varchar(30)
+  status varchar(20)
+  contact_name varchar(255)
+  contact_id varchar(100)
+  conversation_id varchar(100)
+  agent_id varchar(100)
+  close_reason varchar(100)
+  intent varchar(200)
+  is_fallback boolean [not null, default: false]
+  message_body text
+  is_bot boolean [not null, default: false]
+  is_human boolean [not null, default: false]
+  wait_time_seconds integer
+  handle_time_seconds integer
+
+  indexes {
+    (tenant_id, message_id) [unique, name: 'uq_messages_tenant_msg']
+    (tenant_id, date) [name: 'idx_messages_tenant_date']
+    (tenant_id, direction) [name: 'idx_messages_tenant_direction']
+    (tenant_id, contact_id) [name: 'idx_messages_contact']
+    (tenant_id, conversation_id) [name: 'idx_messages_conversation']
+  }
+}
+
+Table daily_stats {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  date date [not null]
+  total_messages integer [not null]
+  unique_contacts integer [not null]
+  conversations integer [not null]
+  fallback_count integer [not null, default: 0]
+
+  indexes {
+    (tenant_id, date) [unique, name: 'uq_daily_stats_tenant_date']
+  }
+}
+
+// ── Campaigns Domain ──
+
+Table toques_daily {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  date date [not null]
+  canal varchar(30) [not null]
+  proyecto_cuenta varchar(100) [not null]
+  enviados integer [not null, default: 0]
+  entregados integer [not null, default: 0]
+  clicks integer [not null, default: 0]
+  chunks integer [not null, default: 0]
+  usuarios_unicos integer [not null, default: 0]
+  abiertos integer
+  rebotes integer
+  bloqueados integer
+  spam integer
+  desuscritos integer
+  conversiones integer
+  ctr decimal(6,2)
+  tasa_entrega decimal(6,2)
+  open_rate decimal(6,2)
+  conversion_rate decimal(6,2)
+
+  indexes {
+    (tenant_id, date, canal, proyecto_cuenta) [unique, name: 'uq_toques_daily_composite']
+    (tenant_id, date) [name: 'idx_toques_daily_tenant_date']
+    (tenant_id, canal) [name: 'idx_toques_daily_canal']
+    (tenant_id, proyecto_cuenta) [name: 'idx_toques_daily_project']
+  }
+}
+
+Table campaigns {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  campana_id varchar(100) [not null]
+  campana_nombre varchar(255) [not null]
+  canal varchar(30) [not null]
+  proyecto_cuenta varchar(100) [not null]
+  tipo_campana varchar(50)
+  total_enviados integer [not null, default: 0]
+  total_entregados integer [not null, default: 0]
+  total_clicks integer [not null, default: 0]
+  total_chunks integer [not null, default: 0]
+  fecha_inicio date
+  fecha_fin date
+  total_abiertos integer
+  total_rebotes integer
+  total_bloqueados integer
+  total_spam integer
+  total_desuscritos integer
+  total_conversiones integer
+  ctr decimal(6,2)
+  tasa_entrega decimal(6,2)
+  open_rate decimal(6,2)
+  conversion_rate decimal(6,2)
+
+  indexes {
+    (tenant_id, campana_id) [unique, name: 'uq_campaigns_tenant_cid']
+  }
+}
+
+Table toques_heatmap {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  canal varchar(30) [not null]
+  dia_semana varchar(12) [not null]
+  hora smallint [not null]
+  enviados integer [not null, default: 0]
+  clicks integer [not null, default: 0]
+  abiertos integer
+  conversiones integer
+  ctr decimal(6,2)
+  dia_orden smallint [not null]
+
+  indexes {
+    (tenant_id, canal, dia_semana, hora) [unique, name: 'uq_heatmap_composite']
+  }
+}
+
+Table toques_usuario {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  telefono varchar(50) [not null]
+  canal varchar(30) [not null]
+  proyecto_cuenta varchar(100) [not null]
+  total_toques integer [not null]
+  total_clicks integer [not null]
+  primer_toque date
+  ultimo_toque date
+  dias_activos integer [not null, default: 0]
+
+  indexes {
+    (tenant_id, telefono, canal, proyecto_cuenta) [unique, name: 'uq_toques_usuario_composite']
+    (tenant_id) [name: 'idx_toques_usuario_tenant']
+    (tenant_id, telefono) [name: 'idx_toques_usuario_phone']
+  }
+}
+
+// ── Application Domain ──
+
+Table saved_queries {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  name varchar(255) [not null]
+  query_text text [not null]
+  ai_function varchar(50)
+  generated_sql text
+  result_data jsonb [not null]
+  result_columns jsonb [not null]
+  result_row_count integer [not null]
+  visualizations jsonb [not null]
+  tags "text[]"
+  is_favorite boolean [not null, default: false]
+  is_archived boolean [not null, default: false]
+  created_by varchar(100)
+  created_at timestamptz
+  updated_at timestamptz
+  updated_by varchar(100)
+  last_run_at timestamptz
+
+  indexes {
+    (tenant_id) [name: 'idx_saved_queries_tenant']
+  }
+}
+
+Table dashboards {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  name varchar(255) [not null]
+  description text
+  layout jsonb [not null]
+  filters jsonb
+  tags "text[]"
+  is_favorite boolean [not null, default: false]
+  is_archived boolean [not null, default: false]
+  is_default boolean [not null, default: false]
+  auto_refresh_seconds integer
+  created_by varchar(100)
+  updated_by varchar(100)
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table sync_state {
+  id integer [pk, increment]
+  tenant_id text [not null]
+  entity varchar(50) [not null]
+  last_cursor text
+  last_sync_at timestamptz
+  records_synced integer
+  status varchar(20) [not null, default: 'pending']
+
+  indexes {
+    (tenant_id, entity) [unique, name: 'uq_sync_state_tenant_entity']
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Relationships (Foreign Keys)
+// ═══════════════════════════════════════════════════════════
+
+// messages → contacts (cada mensaje pertenece a un contacto)
+Ref: messages.(tenant_id, contact_id) > contacts.(tenant_id, contact_id)
+
+// messages → agents (cada mensaje puede ser atendido por un agente)
+Ref: messages.(tenant_id, agent_id) > agents.(tenant_id, agent_id)
+
+// messages → daily_stats (cada mensaje pertenece a un día de stats)
+Ref: messages.(tenant_id, date) > daily_stats.(tenant_id, date)
+
+// toques_daily → daily_stats (stats de push se agregan a stats diarios)
+Ref: toques_daily.(tenant_id, date) > daily_stats.(tenant_id, date)
+
+// toques_usuario comparte canal/proyecto con toques_daily
+Ref: toques_usuario.canal - toques_daily.canal
+
+// campaigns comparte canal/proyecto con toques_daily
+Ref: campaigns.canal - toques_daily.canal

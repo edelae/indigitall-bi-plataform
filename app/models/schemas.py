@@ -2,7 +2,7 @@
 
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, Date, SmallInteger,
-    Numeric, DateTime, Index, UniqueConstraint,
+    Numeric, DateTime, Index, UniqueConstraint, ForeignKeyConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TIMESTAMP
 from sqlalchemy.sql import func
@@ -43,6 +43,30 @@ class Message(Base):
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "message_id", name="uq_messages_tenant_msg"),
+        ForeignKeyConstraint(
+            ["tenant_id", "contact_id"],
+            ["contacts.tenant_id", "contacts.contact_id"],
+            name="fk_messages_contact",
+            ondelete="SET NULL",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "agent_id"],
+            ["agents.tenant_id", "agents.agent_id"],
+            name="fk_messages_agent",
+            ondelete="SET NULL",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "date"],
+            ["daily_stats.tenant_id", "daily_stats.date"],
+            name="fk_messages_daily_stats",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         Index("idx_messages_tenant_date", "tenant_id", "date"),
         Index("idx_messages_tenant_direction", "tenant_id", "direction"),
         Index("idx_messages_contact", "tenant_id", "contact_id"),
@@ -129,6 +153,14 @@ class ToquesDaily(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "date", "canal", "proyecto_cuenta",
                          name="uq_toques_daily_composite"),
+        ForeignKeyConstraint(
+            ["tenant_id", "date"],
+            ["daily_stats.tenant_id", "daily_stats.date"],
+            name="fk_toques_daily_daily_stats",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         Index("idx_toques_daily_tenant_date", "tenant_id", "date"),
         Index("idx_toques_daily_canal", "tenant_id", "canal"),
         Index("idx_toques_daily_project", "tenant_id", "proyecto_cuenta"),
