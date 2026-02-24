@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
 
     # Default tenant for dev mode (no JWT)
-    DEFAULT_TENANT: str = "demo"
+    DEFAULT_TENANT: str = "visionamos"
 
     # Auth mode: "dev" (no auth, query-param tenant) or "jwt" (indigitall JWT)
     AUTH_MODE: str = "dev"

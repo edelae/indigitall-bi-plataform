@@ -9,7 +9,7 @@ from sqlalchemy import select, func, text, case, and_
 from typing import Optional, List, Dict, Any
 
 from app.models.database import engine
-from app.models.schemas import Message, Contact, Agent, DailyStat
+from app.models.schemas import Message, Contact, Agent, DailyStat, SyncState
 
 
 class DataService:
@@ -29,7 +29,19 @@ class DataService:
     # --- Tenant list ---
 
     def get_entities(self) -> List[str]:
-        """Get unique tenant IDs ordered by message volume."""
+        """Get unique tenant IDs from contacts (or messages if available)."""
+        # Try contacts first (populated by transform bridge)
+        stmt = (
+            select(Contact.tenant_id, func.count().label("cnt"))
+            .group_by(Contact.tenant_id)
+            .order_by(func.count().desc())
+            .limit(50)
+        )
+        df = self._exec(stmt)
+        if not df.empty:
+            return df["tenant_id"].tolist()
+
+        # Fallback to messages
         stmt = (
             select(Message.tenant_id, func.count().label("cnt"))
             .group_by(Message.tenant_id)
@@ -42,24 +54,74 @@ class DataService:
     # --- Summary stats ---
 
     def get_summary_stats(self, tenant_filter: Optional[str] = None) -> Dict[str, Any]:
-        t = Message.__table__
-        w = self._tenant_filter(t, tenant_filter)
-        stmt = select(
-            func.count().label("total_messages"),
-            func.count(func.distinct(t.c.contact_id)).label("unique_contacts"),
-            func.count(func.distinct(t.c.agent_id)).label("active_agents"),
-            func.count(func.distinct(t.c.conversation_id)).label("total_conversations"),
-        ).where(w)
+        """Aggregate KPIs from multiple tables.
 
+        Uses messages table if populated, otherwise falls back to
+        contacts + daily_stats + raw agent count from chat_stats.
+        """
         with engine.connect() as conn:
-            row = conn.execute(stmt).first()
+            # Check if messages table has data for this tenant
+            t = Message.__table__
+            w = self._tenant_filter(t, tenant_filter)
+            msg_count = conn.execute(
+                select(func.count()).select_from(t).where(w)
+            ).scalar() or 0
 
-        return {
-            "total_messages": row.total_messages or 0,
-            "unique_contacts": row.unique_contacts or 0,
-            "active_agents": row.active_agents or 0,
-            "total_conversations": row.total_conversations or 0,
-        }
+            if msg_count > 0:
+                # Original path: derive everything from messages
+                row = conn.execute(
+                    select(
+                        func.count().label("total_messages"),
+                        func.count(func.distinct(t.c.contact_id)).label("unique_contacts"),
+                        func.count(func.distinct(t.c.agent_id)).label("active_agents"),
+                        func.count(func.distinct(t.c.conversation_id)).label("total_conversations"),
+                    ).where(w)
+                ).first()
+                return {
+                    "total_messages": row.total_messages or 0,
+                    "unique_contacts": row.unique_contacts or 0,
+                    "active_agents": row.active_agents or 0,
+                    "total_conversations": row.total_conversations or 0,
+                }
+
+            # Fallback: aggregate from contacts, daily_stats, and raw chat_stats
+            ct = Contact.__table__
+            cw = self._tenant_filter(ct, tenant_filter)
+            unique_contacts = conn.execute(
+                select(func.count()).select_from(ct).where(cw)
+            ).scalar() or 0
+
+            dt = DailyStat.__table__
+            dw = self._tenant_filter(dt, tenant_filter)
+            row = conn.execute(
+                select(
+                    func.coalesce(func.sum(dt.c.total_messages), 0).label("total_messages"),
+                    func.coalesce(func.sum(dt.c.conversations), 0).label("conversations"),
+                ).where(dw)
+            ).first()
+            total_messages = row.total_messages or 0
+            total_conversations = row.conversations or 0
+
+            # Active agents from raw.raw_chat_stats (latest snapshot)
+            active_agents = 0
+            try:
+                agent_row = conn.execute(text("""
+                    SELECT (source_data->'data'->>'activeAgents')::int
+                    FROM raw.raw_chat_stats
+                    WHERE endpoint LIKE '%/agent/status%'
+                    ORDER BY loaded_at DESC LIMIT 1
+                """)).first()
+                if agent_row:
+                    active_agents = agent_row[0] or 0
+            except Exception:
+                pass
+
+            return {
+                "total_messages": total_messages,
+                "unique_contacts": unique_contacts,
+                "active_agents": active_agents,
+                "total_conversations": total_conversations,
+            }
 
     # --- Recent messages ---
 
