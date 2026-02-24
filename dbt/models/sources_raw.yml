@@ -1,0 +1,38 @@
+version: 2
+
+sources:
+  - name: raw_jsonb
+    schema: raw
+    description: >
+      Raw JSONB landing tables populated by the Indigitall API extraction pipeline.
+      Each table stores full API responses as source_data JSONB blobs.
+    tables:
+      - name: raw_contacts_api
+        description: Chat contacts from /v1/chat/contacts — source_data.data[] = contact objects
+        columns:
+          - name: source_data
+            tests: [not_null]
+
+      - name: raw_push_stats
+        description: Push stats from dateStats + pushHeatmap endpoints
+        columns:
+          - name: source_data
+            tests: [not_null]
+
+      - name: raw_chat_stats
+        description: Chat stats from agent/status and other chat endpoints
+        columns:
+          - name: source_data
+            tests: [not_null]
+
+      - name: raw_campaigns_api
+        description: Campaigns from /v1/campaign
+        columns:
+          - name: source_data
+            tests: [not_null]
+
+      - name: raw_applications
+        description: Application metadata from /v1/application
+        columns:
+          - name: source_data
+            tests: [not_null]

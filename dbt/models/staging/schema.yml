@@ -42,3 +42,53 @@ models:
         tests: [not_null]
       - name: campana_id
         tests: [not_null, unique]
+
+  # ── Raw JSONB staging models (transformation bridge) ──
+
+  - name: stg_raw_contacts
+    description: Contacts flattened from raw.raw_contacts_api JSONB
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: contact_id
+        tests: [not_null]
+
+  - name: stg_raw_push_daily
+    description: Push daily stats flattened from raw.raw_push_stats (dateStats)
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+      - name: canal
+        tests: [not_null]
+
+  - name: stg_raw_push_heatmap
+    description: Push heatmap flattened from raw.raw_push_stats (pushHeatmap)
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: dia_semana
+        tests: [not_null]
+      - name: hora
+        tests: [not_null]
+
+  - name: stg_raw_campaigns
+    description: Campaigns flattened from raw.raw_campaigns_api JSONB
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+
+  - name: stg_raw_app_summary
+    description: Application metadata flattened from raw.raw_applications
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: app_id
+        tests: [not_null]
+
+  - name: stg_raw_agent_status
+    description: Agent count snapshot from raw.raw_chat_stats (agent/status)
+    columns:
+      - name: tenant_id
+        tests: [not_null]

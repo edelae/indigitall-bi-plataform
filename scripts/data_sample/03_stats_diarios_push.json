@@ -1,0 +1,54 @@
+{
+  "statusCode": 200,
+  "message": "OK",
+  "data": [
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-16",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-16",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-16",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "android",
+      "statsDate": "2026-02-17",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "ios",
+      "statsDate": "2026-02-17",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    },
+    {
+      "platformGroup": "web",
+      "statsDate": "2026-02-17",
+      "numDevicesSent": 0,
+      "numDevicesSuccess": 0,
+      "numDevicesReceived": 0,
+      "numDevicesClicked": 0
+    }
+  ]
+}
