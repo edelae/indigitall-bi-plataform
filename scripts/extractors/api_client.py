@@ -161,6 +161,61 @@ class IndigitallAPIClient:
         return None
 
     # ------------------------------------------------------------------
+    # GET (raw text) — for CSV endpoints like chat/history/csv
+    # ------------------------------------------------------------------
+
+    def get_text(self, endpoint: str, params: dict | None = None,
+                 application_id: str | None = None) -> str | None:
+        """GET that returns raw text (CSV) instead of parsed JSON."""
+        url = f"{self.base_url}{endpoint}"
+
+        for attempt in range(1, cfg.API_MAX_RETRIES + 1):
+            time.sleep(cfg.API_REQUEST_DELAY_SECONDS)
+
+            start = time.time()
+            try:
+                resp = self.session.get(url, params=params, timeout=cfg.API_TIMEOUT_SECONDS)
+            except requests.RequestException as exc:
+                duration_ms = int((time.time() - start) * 1000)
+                self._log_call(
+                    endpoint=endpoint, http_status=0,
+                    duration_ms=duration_ms,
+                    error_message=str(exc)[:500],
+                    application_id=application_id,
+                )
+                if attempt == cfg.API_MAX_RETRIES:
+                    raise
+                time.sleep(2 ** attempt)
+                continue
+
+            duration_ms = int((time.time() - start) * 1000)
+
+            if resp.status_code == 429:
+                self._log_call(
+                    endpoint=endpoint, http_status=429,
+                    duration_ms=duration_ms,
+                    error_message="Rate limited — backing off",
+                    application_id=application_id,
+                )
+                time.sleep(2 ** attempt)
+                continue
+
+            self._log_call(
+                endpoint=endpoint, http_status=resp.status_code,
+                duration_ms=duration_ms,
+                error_message=None if resp.ok else resp.text[:500],
+                application_id=application_id,
+            )
+
+            if not resp.ok:
+                print(f"    [WARN] {endpoint} returned {resp.status_code}")
+                return None
+
+            return resp.text
+
+        return None
+
+    # ------------------------------------------------------------------
     # POST helper (some Indigitall stats endpoints use POST)
     # ------------------------------------------------------------------
 
