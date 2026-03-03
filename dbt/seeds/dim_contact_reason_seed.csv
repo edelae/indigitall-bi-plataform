@@ -1,0 +1,13 @@
+contact_reason_key,reason_code,reason_name,parent_key,level,is_active
+1,mesa_servicios,Mesa de Servicios,,1,true
+2,virtualcoop,VirtualCoop,1,2,true
+3,red_coopcentral,Red Coopcentral,1,2,true
+4,gestion_dispositivos,Gestión de Dispositivos,,1,true
+5,devolucion,Devolución,4,2,true
+6,solicitud_reposicion,Solicitud / Reposición,4,2,true
+7,traslado,Traslado,4,2,true
+8,soporte_novedades,Soporte Novedades,4,2,true
+9,documentacion_red,Documentación Red,,1,true
+10,encuesta,Encuesta,,1,true
+11,sin_clasificar,Sin Clasificar,,1,true
+12,sin_clasificar_general,General,11,2,true

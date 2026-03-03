@@ -24,7 +24,17 @@ models:
       +materialized: view
       +schema: staging
       +tags: ["staging"]
+    intermediate:
+      +materialized: ephemeral
+      +tags: ["intermediate"]
     marts:
       +materialized: table
       +schema: marts
       +tags: ["marts"]
+      analytics:
+        +schema: analytics
+        +tags: ["analytics"]
+
+seeds:
+  indigitall_analytics:
+    +schema: analytics

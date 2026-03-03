@@ -1,0 +1,19 @@
+event_type_key,event_code,event_name,event_category,is_terminal,ordinal
+1,sent,Enviado,delivery,false,1
+2,delivered,Entregado,delivery,false,2
+3,read,Leido,engagement,false,3
+4,opened,Abierto,engagement,false,3
+5,clicked,Click,engagement,false,4
+6,replied,Respondido,engagement,false,5
+7,converted,Convertido,engagement,true,6
+8,failed,Fallido,error,true,10
+9,bounced,Rebotado,error,true,11
+10,rejected,Rechazado,error,true,12
+11,blocked,Bloqueado,error,true,13
+12,spam,Spam,error,true,14
+13,unsubscribed,Desuscrito,error,true,15
+14,queued,En Cola,lifecycle,false,20
+15,assigned,Asignado,lifecycle,false,21
+16,closed,Cerrado,lifecycle,true,22
+17,escalated,Escalado,lifecycle,false,23
+18,fallback,Fallback,lifecycle,false,24

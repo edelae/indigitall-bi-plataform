@@ -586,3 +586,95 @@ class ChartService:
             y_col: Column for values
         """
         return self._create_pie_chart(df, title, x_col, y_col)
+
+    def create_stacked_area_chart(
+        self, df: pd.DataFrame, title: str,
+        x_col: str, y_cols: List[str],
+        labels: Optional[Dict[str, str]] = None,
+        colors: Optional[List[str]] = None,
+    ) -> go.Figure:
+        """Create a stacked area chart with multiple series."""
+        if df.empty:
+            return self._create_empty_chart(title)
+
+        palette = colors or [self.COLORS["primary"], self.COLORS["secondary"], "#FFC107"]
+        fig = go.Figure()
+        for i, col in enumerate(y_cols):
+            label = labels.get(col, col) if labels else col
+            color = palette[i % len(palette)]
+            fig.add_trace(go.Scatter(
+                x=df[x_col], y=df[col],
+                mode="lines",
+                name=label,
+                stackgroup="one",
+                line=dict(color=color, width=2),
+                fillcolor=color.replace(")", ", 0.3)").replace("rgb", "rgba")
+                if color.startswith("rgb") else color + "1A",
+                hovertemplate=f"<b>{label}</b><br>%{{x}}<br>%{{y:,.0f}}<extra></extra>",
+            ))
+        fig.update_layout(**self.default_layout, title=title)
+        fig.update_layout(legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5,
+        ))
+        return fig
+
+    def create_gauge_chart(
+        self, value: float, title: str,
+        target: float = 50, max_val: float = 100,
+    ) -> go.Figure:
+        """Create a gauge indicator chart with red/yellow/green bands."""
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=value,
+            number={"suffix": "%", "font": {"size": 28, "color": "#1A1A2E"}},
+            gauge={
+                "axis": {"range": [0, max_val], "tickfont": {"size": 11, "color": "#6E7191"}},
+                "bar": {"color": self.COLORS["primary"]},
+                "steps": [
+                    {"range": [0, max_val * 0.2], "color": "#E8F5E9"},
+                    {"range": [max_val * 0.2, max_val * 0.4], "color": "#FFF8E1"},
+                    {"range": [max_val * 0.4, max_val], "color": "#FFEBEE"},
+                ],
+                "threshold": {
+                    "line": {"color": "#EF4444", "width": 3},
+                    "thickness": 0.8,
+                    "value": target,
+                },
+            },
+        ))
+        fig.update_layout(
+            **self.default_layout,
+            title=title,
+            height=250,
+            margin={"l": 30, "r": 30, "t": 50, "b": 20},
+        )
+        return fig
+
+    def create_line_chart_with_target(
+        self, df: pd.DataFrame, title: str,
+        x_col: str, y_col: str,
+        target_value: float, target_label: str = "Meta",
+    ) -> go.Figure:
+        """Create a line chart with a horizontal target reference line."""
+        if df.empty:
+            return self._create_empty_chart(title)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df[x_col], y=df[y_col],
+            mode="lines+markers",
+            name=y_col,
+            line=dict(color=self.COLORS["primary"], width=2),
+            marker=dict(size=6),
+            hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
+        ))
+        fig.add_hline(
+            y=target_value, line_dash="dash",
+            line_color="#EF4444",
+            annotation_text=f"{target_label}: {target_value}%",
+            annotation_position="top right",
+            annotation_font_size=12,
+            annotation_font_color="#EF4444",
+        )
+        fig.update_layout(**self.default_layout, title=title)
+        return fig

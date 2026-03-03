@@ -1,12 +1,16 @@
 """Contact Center Service — Queries for agent conversation analytics."""
 
+import logging
+
 import pandas as pd
 from datetime import date as date_type
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_, case, text
 from typing import Optional, Dict, Any
 
 from app.models.database import engine
 from app.models.schemas import ChatConversation
+
+log = logging.getLogger(__name__)
 
 
 class ContactCenterService:
@@ -147,6 +151,150 @@ class ContactCenterService:
             df = df.sort_values("bucket").reset_index(drop=True)
         return df
 
+    def get_cc_kpis_expanded(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> Dict[str, Any]:
+        """Expanded KPIs: convs, FCR, avg FRT, avg handle, coverage, NPS placeholder."""
+        t = ChatConversation.__table__
+        w = self._base_where(t, tenant_filter, start_date, end_date)
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(
+                    func.count().label("total_conversations"),
+                    func.count(func.distinct(t.c.agent_id)).label("active_agents"),
+                    func.avg(t.c.wait_time_seconds).label("avg_frt"),
+                    func.avg(t.c.handle_time_seconds).label("avg_handle"),
+                    func.count(func.distinct(t.c.contact_id)).label("total_contacts"),
+                ).where(w)
+            ).first()
+
+            # FCR: contacts with exactly 1 session / total contacts
+            fcr_row = conn.execute(
+                select(func.count()).select_from(
+                    select(t.c.contact_id)
+                    .where(and_(w, t.c.contact_id.isnot(None)))
+                    .group_by(t.c.contact_id)
+                    .having(func.count() == 1)
+                    .subquery()
+                )
+            ).scalar() or 0
+
+        total_contacts = row.total_contacts or 0
+        total_convs = row.total_conversations or 0
+        return {
+            "total_conversations": total_convs,
+            "active_agents": row.active_agents or 0,
+            "fcr_rate": round(fcr_row / total_contacts * 100, 1) if total_contacts > 0 else 0,
+            "avg_frt_seconds": round(float(row.avg_frt or 0), 0),
+            "avg_handle_seconds": round(float(row.avg_handle or 0), 0),
+            "coverage_rate": 0,
+            "nps": 0,
+        }
+
+    def get_first_response_time_trend(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> pd.DataFrame:
+        """Daily average first response time trend."""
+        t = ChatConversation.__table__
+        w = and_(
+            self._base_where(t, tenant_filter, start_date, end_date),
+            t.c.wait_time_seconds.isnot(None),
+        )
+        date_col = func.date(t.c.closed_at).label("date")
+        stmt = (
+            select(date_col, func.avg(t.c.wait_time_seconds).label("avg_frt_seconds"))
+            .where(w)
+            .group_by(date_col)
+            .order_by(date_col)
+        )
+        return self._exec(stmt)
+
+    def get_handle_time_trend(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> pd.DataFrame:
+        """Daily average handle time trend."""
+        t = ChatConversation.__table__
+        w = and_(
+            self._base_where(t, tenant_filter, start_date, end_date),
+            t.c.handle_time_seconds.isnot(None),
+        )
+        date_col = func.date(t.c.closed_at).label("date")
+        stmt = (
+            select(date_col, func.avg(t.c.handle_time_seconds).label("avg_handle_seconds"))
+            .where(w)
+            .group_by(date_col)
+            .order_by(date_col)
+        )
+        return self._exec(stmt)
+
+    def get_agent_performance_table(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+        limit: int = 20,
+    ) -> pd.DataFrame:
+        """Expanded agent performance with FRT and handle time."""
+        t = ChatConversation.__table__
+        w = and_(
+            self._base_where(t, tenant_filter, start_date, end_date),
+            t.c.agent_id.isnot(None),
+        )
+        stmt = (
+            select(
+                t.c.agent_id,
+                func.count().label("conversations"),
+                func.count(func.distinct(t.c.contact_id)).label("contacts"),
+                func.avg(t.c.wait_time_seconds).label("avg_frt"),
+                func.avg(t.c.handle_time_seconds).label("avg_handle"),
+            )
+            .where(w)
+            .group_by(t.c.agent_id)
+            .order_by(func.count().desc())
+            .limit(limit)
+        )
+        df = self._exec(stmt)
+        if not df.empty:
+            df["avg_frt"] = df["avg_frt"].round(0).fillna(0).astype(int)
+            df["avg_handle"] = df["avg_handle"].round(0).fillna(0).astype(int)
+        return df
+
+    def get_conversation_drill_data(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+        granularity: str = "month",
+    ) -> pd.DataFrame:
+        """Aggregated conversation counts for drill-down."""
+        t = ChatConversation.__table__
+        w = self._base_where(t, tenant_filter, start_date, end_date)
+
+        if granularity == "month":
+            period = func.to_char(t.c.closed_at, "YYYY-MM").label("period")
+        elif granularity == "week":
+            period = func.to_char(t.c.closed_at, "IYYY-\"W\"IW").label("period")
+        else:
+            period = func.date(t.c.closed_at).label("period")
+
+        stmt = (
+            select(period, func.count().label("count"))
+            .where(w)
+            .group_by(period)
+            .order_by(period)
+        )
+        return self._exec(stmt)
+
     def get_hourly_queue(
         self,
         tenant_filter: Optional[str] = None,
@@ -167,3 +315,135 @@ class ContactCenterService:
             .order_by(hour_col)
         )
         return self._exec(stmt)
+
+    # ==================== WhatsApp Atendimiento Methods ====================
+
+    def get_conversation_type_counts(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> Dict[str, int]:
+        """Classify conversations: bot-only, human-only, or mixed."""
+        from app.models.schemas import Message
+        m = Message.__table__
+        w = self._tenant_filter(m, tenant_filter)
+        if start_date and end_date:
+            w = and_(w, m.c.date >= start_date, m.c.date <= end_date)
+
+        sub = (
+            select(
+                m.c.conversation_id,
+                func.bool_or(m.c.is_bot).label("has_bot"),
+                func.bool_or(m.c.is_human).label("has_human"),
+            )
+            .where(and_(w, m.c.conversation_id.isnot(None)))
+            .group_by(m.c.conversation_id)
+            .subquery()
+        )
+
+        stmt = select(
+            func.count().label("total"),
+            func.sum(case((and_(sub.c.has_bot, ~sub.c.has_human), 1), else_=0)).label("bot_only"),
+            func.sum(case((and_(~sub.c.has_bot, sub.c.has_human), 1), else_=0)).label("human_only"),
+            func.sum(case((and_(sub.c.has_bot, sub.c.has_human), 1), else_=0)).label("mixed"),
+        ).select_from(sub)
+
+        with engine.connect() as conn:
+            row = conn.execute(stmt).first()
+
+        return {
+            "total": row.total or 0,
+            "bot_only": int(row.bot_only or 0),
+            "human_only": int(row.human_only or 0),
+            "mixed": int(row.mixed or 0),
+        }
+
+    def get_conversation_type_trend(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> pd.DataFrame:
+        """Daily conversation classification trend for stacked area chart."""
+        from app.models.schemas import Message
+        m = Message.__table__
+        w = self._tenant_filter(m, tenant_filter)
+        if start_date and end_date:
+            w = and_(w, m.c.date >= start_date, m.c.date <= end_date)
+
+        sub = (
+            select(
+                m.c.conversation_id,
+                func.min(m.c.date).label("date"),
+                func.bool_or(m.c.is_bot).label("has_bot"),
+                func.bool_or(m.c.is_human).label("has_human"),
+            )
+            .where(and_(w, m.c.conversation_id.isnot(None)))
+            .group_by(m.c.conversation_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                sub.c.date,
+                func.sum(case((and_(sub.c.has_bot, ~sub.c.has_human), 1), else_=0)).label("bot_only"),
+                func.sum(case((and_(~sub.c.has_bot, sub.c.has_human), 1), else_=0)).label("human_only"),
+                func.sum(case((and_(sub.c.has_bot, sub.c.has_human), 1), else_=0)).label("mixed"),
+            )
+            .select_from(sub)
+            .group_by(sub.c.date)
+            .order_by(sub.c.date)
+        )
+        return self._exec(stmt)
+
+    def get_dead_time_trend(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> pd.DataFrame:
+        """Daily average dead time from analytics dim_conversation."""
+        try:
+            sql = text("""
+                SELECT date(created_at) AS date,
+                       AVG(dead_time_seconds) AS avg_dead_time_seconds
+                FROM public_analytics.dim_conversation
+                WHERE dead_time_seconds IS NOT NULL
+                  AND (:start IS NULL OR date(created_at) >= :start)
+                  AND (:end IS NULL OR date(created_at) <= :end)
+                GROUP BY date(created_at)
+                ORDER BY date(created_at)
+            """)
+            with engine.connect() as conn:
+                return pd.read_sql(sql, conn, params={"start": start_date, "end": end_date})
+        except Exception:
+            log.warning("Analytics schema unavailable for dead_time_trend")
+            return pd.DataFrame(columns=["date", "avg_dead_time_seconds"])
+
+    def get_managed_vs_unmanaged(
+        self,
+        tenant_filter: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Contact coverage: managed (has conversations) vs unmanaged."""
+        try:
+            sql = text("""
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN has_conversations THEN 1 ELSE 0 END) AS managed,
+                    SUM(CASE WHEN NOT has_conversations THEN 1 ELSE 0 END) AS unmanaged
+                FROM public_analytics.dim_contact
+            """)
+            with engine.connect() as conn:
+                row = conn.execute(sql).first()
+            total = row.total or 0
+            managed = int(row.managed or 0)
+            return {
+                "total": total,
+                "managed": managed,
+                "unmanaged": int(row.unmanaged or 0),
+                "managed_pct": round(managed / total * 100, 1) if total > 0 else 0,
+            }
+        except Exception:
+            log.warning("Analytics schema unavailable for managed_vs_unmanaged")
+            return {"total": 0, "managed": 0, "unmanaged": 0, "managed_pct": 0}

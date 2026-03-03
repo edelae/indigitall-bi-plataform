@@ -1,0 +1,10 @@
+channel_key,channel_code,channel_name,sub_channel,channel_family,is_bidirectional,icon_class,display_order
+1,sms,SMS,General,Campana,false,bi-chat-dots,1
+2,wa_marketing,WhatsApp,Marketing,Campana,false,bi-whatsapp,2
+3,wa_chatbot,WhatsApp,Chatbot,Conversacional,true,bi-robot,3
+4,wa_callcenter,WhatsApp,Call Center,Conversacional,true,bi-headset,4
+5,push_android,Push,Android,Campana,false,bi-google,5
+6,push_ios,Push,iOS,Campana,false,bi-apple,6
+7,push_web,Push,Web,Campana,false,bi-globe,7
+8,email,Email,General,Campana,false,bi-envelope,8
+9,inapp,In-App,General,Campana,false,bi-phone,9

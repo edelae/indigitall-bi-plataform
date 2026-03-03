@@ -451,6 +451,32 @@ html, body {
 .sync-card .bi-arrow-repeat { color: var(--id-primary); }
 .sync-card .bi-clock { color: var(--id-text-muted); }
 
+/* === Unified Dashboard Tabs === */
+.ud-tabs .nav-link.disabled {
+  color: #A0A3BD !important;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ud-wa-subtabs .nav-link {
+  font-size: 13px;
+  border-radius: 24px;
+  padding: 6px 16px;
+  margin-right: 4px;
+}
+
+.ud-wa-subtabs .nav-link.active {
+  background-color: var(--id-primary);
+  color: #fff;
+  border-color: var(--id-primary);
+}
+
+.ud-wa-subtabs .nav-link.disabled {
+  color: #A0A3BD;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* === Responsive === */
 @media (max-width: 1200px) {
   .query-page-row .chat-column { flex: 0 0 45%; max-width: 45%; }

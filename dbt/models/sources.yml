@@ -96,3 +96,11 @@ sources:
             tests: [not_null]
           - name: topic_id
             tests: [not_null]
+
+      - name: sms_envios
+        description: SMS sending records from Indigitall API v2 (/v2/sms/send)
+        columns:
+          - name: tenant_id
+            tests: [not_null]
+          - name: sending_id
+            tests: [not_null]

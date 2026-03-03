@@ -59,3 +59,11 @@ models:
       - name: topic_id
         tests: [not_null]
 
+  - name: stg_sms_envios
+    description: Deduplicated SMS sending records with derived date/hour (API-only)
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: sending_id
+        tests: [not_null, unique]
+

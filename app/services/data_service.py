@@ -836,6 +836,123 @@ class DataService:
         )
         return self._exec(stmt)
 
+    # --- WhatsApp/Bot dashboard queries ---
+
+    def get_wa_kpis(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> Dict[str, Any]:
+        """KPIs for WhatsApp/Bot tab: messages, contacts, fallback, wait, delivery, bot resolution."""
+        t = Message.__table__
+        w = self._tenant_filter(t, tenant_filter)
+        if start_date and end_date:
+            w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(
+                    func.count().label("total_messages"),
+                    func.count(func.distinct(t.c.contact_id)).label("unique_contacts"),
+                    func.sum(case((t.c.is_fallback == True, 1), else_=0)).label("fallback_count"),  # noqa: E712
+                    func.avg(t.c.wait_time_seconds).label("avg_wait"),
+                    func.sum(case((t.c.status.in_(["channel_delivered", "channel_read"]), 1), else_=0)).label("delivered"),
+                    func.sum(case((t.c.is_bot == True, 1), else_=0)).label("bot_msgs"),  # noqa: E712
+                ).where(w)
+            ).first()
+
+        total = row.total_messages or 0
+        fb = row.fallback_count or 0
+        delivered = row.delivered or 0
+        bot = row.bot_msgs or 0
+        return {
+            "total_messages": total,
+            "unique_contacts": row.unique_contacts or 0,
+            "fallback_rate": round(fb / total * 100, 2) if total > 0 else 0,
+            "avg_wait_seconds": round(float(row.avg_wait or 0), 1),
+            "delivery_rate": round(delivered / total * 100, 2) if total > 0 else 0,
+            "bot_resolution_pct": round(bot / total * 100, 2) if total > 0 else 0,
+        }
+
+    def get_message_status_distribution(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> pd.DataFrame:
+        """Message count by delivery status."""
+        t = Message.__table__
+        w = and_(
+            self._tenant_filter(t, tenant_filter),
+            t.c.status.isnot(None),
+            t.c.status != "",
+        )
+        if start_date and end_date:
+            w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
+        stmt = (
+            select(t.c.status, func.count().label("count"))
+            .where(w)
+            .group_by(t.c.status)
+            .order_by(func.count().desc())
+        )
+        return self._exec(stmt)
+
+    def get_messages_heatmap(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+    ) -> pd.DataFrame:
+        """Hour x Day-of-week heatmap for messages."""
+        t = Message.__table__
+        w = self._tenant_filter(t, tenant_filter)
+        if start_date and end_date:
+            w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
+        stmt = (
+            select(t.c.day_of_week, t.c.hour.label("hora"), func.count().label("value"))
+            .where(w)
+            .group_by(t.c.day_of_week, t.c.hour)
+            .order_by(t.c.hour)
+        )
+        df = self._exec(stmt)
+        if not df.empty:
+            day_map = {
+                "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miercoles",
+                "Thursday": "Jueves", "Friday": "Viernes",
+                "Saturday": "Sabado", "Sunday": "Domingo",
+            }
+            df["dia_semana"] = df["day_of_week"].map(
+                lambda d: day_map.get(d.strip(), d.strip())
+            )
+            df = df[["dia_semana", "hora", "value"]]
+        return df
+
+    def get_messages_page(
+        self,
+        tenant_filter: Optional[str] = None,
+        start_date: Optional[date_type] = None,
+        end_date: Optional[date_type] = None,
+        page: int = 0,
+        page_size: int = 20,
+    ) -> pd.DataFrame:
+        """Paginated message detail table."""
+        t = Message.__table__
+        w = self._tenant_filter(t, tenant_filter)
+        if start_date and end_date:
+            w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
+        stmt = (
+            select(
+                t.c.date, t.c.hour, t.c.direction, t.c.content_type,
+                t.c.status, t.c.contact_name, t.c.intent, t.c.is_fallback,
+            )
+            .where(w)
+            .order_by(t.c.date.desc(), t.c.hour.desc())
+            .offset(page * page_size)
+            .limit(page_size)
+        )
+        return self._exec(stmt)
+
     def get_schema_description(self) -> str:
         """Schema description for the AI agent system prompt."""
         return """

@@ -1,0 +1,127 @@
+version: 2
+
+models:
+  # ═══════════════════════════════════════════
+  # Dimension Tables
+  # ═══════════════════════════════════════════
+
+  - name: dim_date
+    description: >
+      Date dimension — CTE-generated 10-year calendar (2020-2029).
+      date_key is YYYYMMDD integer format.
+    columns:
+      - name: date_key
+        tests: [unique, not_null]
+      - name: full_date
+        tests: [unique, not_null]
+
+  - name: dim_time
+    description: >
+      Time dimension — 24 rows (0-23 hours) with period_of_day and business hour flag.
+    columns:
+      - name: time_key
+        tests: [unique, not_null]
+
+  - name: dim_channel
+    description: >
+      Channel dimension — 9 messaging channels (SMS, WhatsApp, Push, Email, In-App)
+      with sub_channel and channel_family classification.
+    columns:
+      - name: channel_key
+        tests: [unique, not_null]
+      - name: channel_code
+        tests: [unique, not_null]
+
+  - name: dim_event_type
+    description: >
+      Event type dimension — 18 event types across delivery, engagement, error,
+      and lifecycle categories with terminal flag and ordinal ordering.
+    columns:
+      - name: event_type_key
+        tests: [unique, not_null]
+      - name: event_code
+        tests: [unique, not_null]
+
+  - name: dim_tenant
+    description: >
+      Tenant dimension — single tenant (visionamos) configuration.
+    columns:
+      - name: tenant_key
+        tests: [unique, not_null]
+      - name: tenant_id
+        tests: [unique, not_null]
+
+  - name: dim_contact
+    description: >
+      Unified contact dimension — WhatsApp contacts (by contact_id)
+      and SMS recipients (by phone). ~35K rows.
+    columns:
+      - name: contact_key
+        tests: [unique, not_null]
+
+  - name: dim_agent
+    description: >
+      Agent dimension — enriched with email, first/last active dates
+      from conversation history. 173 agents.
+    columns:
+      - name: agent_key
+        tests: [unique, not_null]
+
+  - name: dim_campaign
+    description: >
+      Campaign dimension — API campaigns + SMS campaign groups
+      with channel_key FK. ~50 campaigns.
+    columns:
+      - name: campaign_key
+        tests: [unique, not_null]
+
+  - name: dim_contact_reason
+    description: >
+      Contact reason dimension — L1/L2 hierarchy (CRIS-inspired).
+      Derived from Dialogflow intents mapped to business categories. ~12 rows.
+    columns:
+      - name: contact_reason_key
+        tests: [unique, not_null]
+      - name: reason_code
+        tests: [unique, not_null]
+
+  - name: dim_conversation_session
+    description: >
+      Conversation session dimension — logical conversations grouping agent sessions
+      by conversation_session_id. Enriched with dominant bot intent and contact reason
+      classification. ~21K rows.
+    columns:
+      - name: conversation_session_key
+        tests: [unique, not_null]
+      - name: conversation_session_id
+        tests: [unique, not_null]
+
+  - name: dim_conversation
+    description: >
+      Conversation dimension — chat sessions with timing metrics,
+      bot resolution and escalation flags, close_reason from messages,
+      and FK to dim_conversation_session. ~38.5K conversations.
+    columns:
+      - name: conversation_key
+        tests: [unique, not_null]
+
+  # ═══════════════════════════════════════════
+  # Fact Table
+  # ═══════════════════════════════════════════
+
+  - name: fact_message_events
+    description: >
+      Unified fact table — one row per atomic messaging event across all channels.
+      ~800K rows from messages (122K), sms_envios (293K×2-3), toques_daily (273×9),
+      and chat_conversations (38K×1-3).
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: channel_key
+        tests: [not_null]
+      - name: event_type_key
+        tests: [not_null]
+      - name: source_table
+        tests: [not_null]
+      - name: event_count
+        tests: [not_null]

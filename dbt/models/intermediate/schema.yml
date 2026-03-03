@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: int_messages_classified
+    description: >
+      WhatsApp messages enriched with channel_code (wa_chatbot, wa_callcenter, wa_marketing)
+      and event_code (sent, delivered, read, failed) derived from status.
+
+  - name: int_sms_events_unpivoted
+    description: >
+      SMS records unpivoted into event rows: 1 SMS → 2-3 events
+      (sent + delivery outcome + optional clicked).
+
+  - name: int_toques_events_unpivoted
+    description: >
+      toques_daily wide metrics unpivoted into tall event rows.
+      SMS rows are excluded when sms_envios has row-level data for the same date.
+
+  - name: int_conversations_enriched
+    description: >
+      Chat conversations enriched with is_resolved_by_bot and is_escalated flags.
+
+  - name: int_dim_contact_unified
+    description: >
+      Unified contact dimension merging WhatsApp contacts (by contact_id)
+      and SMS recipients (by phone number).
+
+  - name: int_bot_intent_bridge
+    description: >
+      Bridges bot messages (with Dialogflow intents) to agent conversation sessions
+      by contact_id + temporal proximity (2h window before queue time).
+
+  - name: int_conversation_sessions
+    description: >
+      Aggregates agent sessions by conversation_session_id into logical conversations.
+      Enriches with dominant bot intent and maps to contact_reason taxonomy (L1/L2).

@@ -281,6 +281,41 @@ class ToquesHeatmap(Base):
     )
 
 
+class SmsEnvio(Base):
+    """Individual SMS sending records imported from console CSV exports."""
+    __tablename__ = "sms_envios"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Text, nullable=False)
+    application_id = Column(String(100), nullable=False)
+    campaign_id = Column(String(100), nullable=False)
+    campaign_name = Column(String(255))
+    sending_id = Column(String(100), nullable=False)
+    phone = Column(String(50), nullable=False)
+    country_code = Column(String(10))
+    external_code = Column(String(100))
+    total_chunks = Column(Integer, nullable=False, default=1)
+    cost = Column(Numeric(10, 2))
+    message_text = Column(Text)
+    mcc_mnc = Column(String(20))
+    network_name = Column(String(100))
+    status = Column(String(30))
+    error_description = Column(String(255))
+    sending_type = Column(String(30))
+    is_flash = Column(Boolean, nullable=False, default=False)
+    sent_at = Column(TIMESTAMP(timezone=True))
+    clicks = Column(Integer, nullable=False, default=0)
+    custom_data = Column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "sending_id", name="uq_sms_envios_tenant_sid"),
+        Index("idx_sms_envios_tenant_date", "tenant_id", "sent_at"),
+        Index("idx_sms_envios_campaign", "tenant_id", "campaign_id"),
+        Index("idx_sms_envios_phone", "tenant_id", "phone"),
+        Index("idx_sms_envios_status", "tenant_id", "status"),
+    )
+
+
 class ToquesUsuario(Base):
     __tablename__ = "toques_usuario"
 

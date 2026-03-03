@@ -6,7 +6,7 @@
 # =============================================================================
 
 # Dash Analytics App
-analytics.abstractstudio.co {
+indigitall.frepi.ai, analytics.abstractstudio.co {
     reverse_proxy localhost:8050
 
     header {

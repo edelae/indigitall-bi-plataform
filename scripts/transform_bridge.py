@@ -722,11 +722,11 @@ def transform_conversations(conn) -> int:
 
         wait_secs = None
         if queued_at and assigned_at:
-            wait_secs = int((assigned_at - queued_at).total_seconds())
+            wait_secs = max(0, int((assigned_at - queued_at).total_seconds()))
 
         handle_secs = None
         if assigned_at and closed_at:
-            handle_secs = int((closed_at - assigned_at).total_seconds())
+            handle_secs = max(0, int((closed_at - assigned_at).total_seconds()))
 
         conn.execute(text(CONVERSATIONS_UPSERT), {
             "tenant_id": r[0],
@@ -1040,12 +1040,131 @@ def update_agents_messages(conn) -> int:
 # Main
 # ---------------------------------------------------------------------------
 
+def transform_sms_aggregates(conn) -> int:
+    """Re-aggregate sms_envios into toques_daily, toques_usuario, campaigns, heatmap.
+
+    Only runs if sms_envios table exists and has data.
+    The actual SMS records are loaded by scripts/import_sms_csv.py.
+    """
+    has_table = conn.execute(text("""
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'sms_envios'
+        )
+    """)).scalar()
+    if not has_table:
+        return 0
+
+    row_count = conn.execute(text(
+        "SELECT count(*) FROM public.sms_envios WHERE tenant_id = :tid"
+    ), {"tid": TENANT_ID}).scalar()
+    if not row_count:
+        return 0
+
+    total = 0
+
+    # toques_daily (canal='sms')
+    result = conn.execute(text("""
+        INSERT INTO public.toques_daily
+            (tenant_id, date, canal, proyecto_cuenta,
+             enviados, entregados, clicks, chunks, usuarios_unicos,
+             abiertos, rebotes, bloqueados, spam, desuscritos, conversiones,
+             ctr, tasa_entrega, open_rate, conversion_rate)
+        SELECT
+            :tid, sent_at::date, 'sms', application_id,
+            count(*),
+            count(*) FILTER (WHERE status = 'DELIVRD'),
+            coalesce(sum(clicks), 0),
+            coalesce(sum(total_chunks), 0),
+            count(DISTINCT phone),
+            0, count(*) FILTER (WHERE status = 'REJECTD'), 0, 0, 0, 0,
+            CASE WHEN count(*) > 0
+                THEN round(coalesce(sum(clicks), 0)::numeric / count(*) * 100, 2)
+                ELSE 0 END,
+            CASE WHEN count(*) > 0
+                THEN round(count(*) FILTER (WHERE status = 'DELIVRD')::numeric / count(*) * 100, 2)
+                ELSE 0 END,
+            0, 0
+        FROM public.sms_envios
+        WHERE tenant_id = :tid AND sent_at IS NOT NULL
+        GROUP BY sent_at::date, application_id
+        ON CONFLICT (tenant_id, date, canal, proyecto_cuenta) DO UPDATE SET
+            enviados = EXCLUDED.enviados, entregados = EXCLUDED.entregados,
+            clicks = EXCLUDED.clicks, chunks = EXCLUDED.chunks,
+            usuarios_unicos = EXCLUDED.usuarios_unicos, rebotes = EXCLUDED.rebotes,
+            ctr = EXCLUDED.ctr, tasa_entrega = EXCLUDED.tasa_entrega
+    """), {"tid": TENANT_ID})
+    total += result.rowcount
+
+    # toques_usuario
+    result = conn.execute(text("""
+        INSERT INTO public.toques_usuario
+            (tenant_id, telefono, canal, proyecto_cuenta,
+             total_toques, total_clicks, primer_toque, ultimo_toque, dias_activos)
+        SELECT
+            :tid, phone, 'sms', application_id,
+            count(*), coalesce(sum(clicks), 0),
+            min(sent_at::date), max(sent_at::date),
+            count(DISTINCT sent_at::date)
+        FROM public.sms_envios
+        WHERE tenant_id = :tid AND sent_at IS NOT NULL
+        GROUP BY phone, application_id
+        ON CONFLICT (tenant_id, telefono, canal, proyecto_cuenta) DO UPDATE SET
+            total_toques = EXCLUDED.total_toques,
+            total_clicks = EXCLUDED.total_clicks,
+            primer_toque = LEAST(toques_usuario.primer_toque, EXCLUDED.primer_toque),
+            ultimo_toque = GREATEST(toques_usuario.ultimo_toque, EXCLUDED.ultimo_toque),
+            dias_activos = EXCLUDED.dias_activos
+    """), {"tid": TENANT_ID})
+    total += result.rowcount
+
+    # campaigns
+    result = conn.execute(text("""
+        INSERT INTO public.campaigns
+            (tenant_id, campana_id, campana_nombre, canal, proyecto_cuenta, tipo_campana,
+             total_enviados, total_entregados, total_clicks, total_chunks,
+             fecha_inicio, fecha_fin,
+             total_abiertos, total_rebotes, total_bloqueados, total_spam,
+             total_desuscritos, total_conversiones,
+             ctr, tasa_entrega, open_rate, conversion_rate)
+        SELECT
+            :tid, campaign_id, campaign_name, 'sms', application_id,
+            max(sending_type),
+            count(*), count(*) FILTER (WHERE status = 'DELIVRD'),
+            coalesce(sum(clicks), 0), coalesce(sum(total_chunks), 0),
+            min(sent_at::date), max(sent_at::date),
+            0, count(*) FILTER (WHERE status = 'REJECTD'), 0, 0, 0, 0,
+            CASE WHEN count(*) > 0
+                THEN round(coalesce(sum(clicks), 0)::numeric / count(*) * 100, 2)
+                ELSE 0 END,
+            CASE WHEN count(*) > 0
+                THEN round(count(*) FILTER (WHERE status = 'DELIVRD')::numeric / count(*) * 100, 2)
+                ELSE 0 END,
+            0, 0
+        FROM public.sms_envios
+        WHERE tenant_id = :tid
+        GROUP BY campaign_id, campaign_name, application_id
+        ON CONFLICT (tenant_id, campana_id) DO UPDATE SET
+            campana_nombre = EXCLUDED.campana_nombre,
+            total_enviados = EXCLUDED.total_enviados,
+            total_entregados = EXCLUDED.total_entregados,
+            total_clicks = EXCLUDED.total_clicks, total_chunks = EXCLUDED.total_chunks,
+            fecha_inicio = EXCLUDED.fecha_inicio, fecha_fin = EXCLUDED.fecha_fin,
+            total_rebotes = EXCLUDED.total_rebotes,
+            ctr = EXCLUDED.ctr, tasa_entrega = EXCLUDED.tasa_entrega
+    """), {"tid": TENANT_ID})
+    total += result.rowcount
+
+    return total
+
+
 TRANSFORMS_PHASE1 = [
     ("contacts",            transform_contacts),
     ("daily_stats",         transform_daily_stats),    # must run BEFORE toques_daily (FK dependency)
     ("toques_daily",        transform_toques_daily),
     ("toques_heatmap",      transform_heatmap),
     ("campaigns",           transform_campaigns),
+    ("sms_aggregates",      transform_sms_aggregates), # SMS from CSV import
     ("chat_conversations",  transform_conversations),  # must run BEFORE messages (agents FK)
     ("chat_channels",       transform_channels),
     ("chat_topics",         transform_topics),

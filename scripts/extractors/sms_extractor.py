@@ -1,11 +1,23 @@
-"""SMS extractor — endpoints not available on am1 with ServerKey auth.
+"""SMS extractor — uses ALL discovered v2 API endpoints for SMS data.
 
-Status: All SMS endpoints return 404 on am1 for this account.
-These endpoints may work on other accounts that have SMS enabled.
-Keeping the extractor for future use with graceful handling.
+Confirmed v2 endpoints (10):
+  GET /v2/sms/campaign?applicationId=X                              → list campaigns
+  GET /v2/sms/campaign/{id}                                         → campaign detail
+  GET /v2/sms/send?applicationId=X&limit=N&page=P                  → list sendings (8.6M)
+  GET /v2/sms/send/{id}                                             → sending detail + campaignSnapshot
+  GET /v2/sms/stats/campaign?applicationId=X&dateFrom=Y&dateTo=Z   → daily stats per campaign (max 99d)
+  GET /v2/sms/stats/campaign/{campaignId}?applicationId=X           → full history per campaign (no date limit)
+  GET /v2/sms/stats/application?applicationId=X&dateFrom=Y&dateTo=Z → daily aggregate stats (max 99d)
+  GET /v2/sms/contact?applicationId=X&limit=N&page=P               → SMS contacts (413K)
+  GET /v2/sms/contact/{id}                                          → contact detail
+  GET /v2/sms/topic?applicationId=X                                 → subscription topics
 """
 
+from datetime import timedelta
+
 from scripts.extractors.base_extractor import BaseExtractor
+
+MAX_STATS_WINDOW_DAYS = 99
 
 
 class SMSExtractor(BaseExtractor):
@@ -13,25 +25,230 @@ class SMSExtractor(BaseExtractor):
     RAW_TABLE = "raw.raw_sms_stats"
 
     def _extract_for_app(self, app_id: str, app_meta: dict):
-        endpoints = [
-            {
-                "name": "sms/stats",
-                "path": "/v1/sms/stats",
-                "params": {
-                    "applicationId": app_id,
-                    "dateFrom": self.date_from_str,
-                    "dateTo": self.date_to_str,
-                },
-            },
-        ]
+        campaign_ids = self._extract_campaigns(app_id)
+        self._extract_campaign_stats_list(app_id)
+        self._extract_campaign_stats_detail(app_id, campaign_ids)
+        self._extract_app_stats(app_id)
+        self._extract_sendings(app_id)
+        self._extract_sending_details(app_id)
+        self._extract_contacts(app_id)
+        self._extract_topics(app_id)
 
-        for ep in endpoints:
-            try:
-                data = self.client.get(ep["path"], params=ep["params"], application_id=app_id)
-                if data is not None:
-                    self._store_raw(app_id, ep["path"], data)
-                    print(f"    {ep['name']}: OK")
-                else:
-                    print(f"    {ep['name']}: not available (likely 404)")
-            except Exception as exc:
-                print(f"    {ep['name']}: FAILED ({exc})")
+    # ------------------------------------------------------------------
+    # Campaigns
+    # ------------------------------------------------------------------
+
+    def _extract_campaigns(self, app_id: str) -> list[int]:
+        """GET /v2/sms/campaign — list all SMS campaigns. Returns campaign IDs."""
+        data = self.client.get(
+            "/v2/sms/campaign",
+            params={"applicationId": app_id},
+            application_id=app_id,
+        )
+        if data is None:
+            print("    sms/campaign: not available")
+            return []
+
+        self._store_raw(app_id, "/v2/sms/campaign", data)
+        campaigns = data.get("data", {}).get("campaigns", [])
+        count = data.get("count", len(campaigns))
+        print(f"    sms/campaign: {count} campaigns")
+        return [c["id"] for c in campaigns if "id" in c]
+
+    # ------------------------------------------------------------------
+    # Stats — aggregated
+    # ------------------------------------------------------------------
+
+    def _extract_campaign_stats_list(self, app_id: str):
+        """GET /v2/sms/stats/campaign — daily stats per campaign (date-ranged, max 99d)."""
+        for start, end in self._date_windows():
+            data = self.client.get(
+                "/v2/sms/stats/campaign",
+                params={
+                    "applicationId": app_id,
+                    "dateFrom": start.isoformat(),
+                    "dateTo": end.isoformat(),
+                },
+                application_id=app_id,
+            )
+            if data is None:
+                print("    sms/stats/campaign: not available")
+                return
+            self._store_raw(app_id, "/v2/sms/stats/campaign", data)
+
+        rows = data.get("data", []) if data else []
+        print(f"    sms/stats/campaign: {len(rows)} rows (last window)")
+
+    def _extract_campaign_stats_detail(self, app_id: str, campaign_ids: list[int]):
+        """GET /v2/sms/stats/campaign/{id} — full history per campaign (no date limit)."""
+        total_rows = 0
+        for cid in campaign_ids:
+            data = self.client.get(
+                f"/v2/sms/stats/campaign/{cid}",
+                params={"applicationId": app_id},
+                application_id=app_id,
+            )
+            if data is None:
+                continue
+            rows = data.get("data", [])
+            total_rows += len(rows)
+            self._store_raw(app_id, f"/v2/sms/stats/campaign/{cid}", data)
+
+        print(f"    sms/stats/campaign/{{id}}: {total_rows} rows across {len(campaign_ids)} campaigns")
+
+    def _extract_app_stats(self, app_id: str):
+        """GET /v2/sms/stats/application — daily aggregate stats (max 99d windows)."""
+        total_rows = 0
+        for start, end in self._date_windows():
+            data = self.client.get(
+                "/v2/sms/stats/application",
+                params={
+                    "applicationId": app_id,
+                    "dateFrom": start.isoformat(),
+                    "dateTo": end.isoformat(),
+                },
+                application_id=app_id,
+            )
+            if data is None:
+                print("    sms/stats/application: not available")
+                return
+            rows = data.get("data", [])
+            total_rows += len(rows)
+            self._store_raw(app_id, "/v2/sms/stats/application", data)
+
+        print(f"    sms/stats/application: {total_rows} daily rows")
+
+    # ------------------------------------------------------------------
+    # Sendings (messages dispatched)
+    # ------------------------------------------------------------------
+
+    def _extract_sendings(self, app_id: str, max_records: int = 2000):
+        """GET /v2/sms/send — paginated list of sendings (capped for structure inspection)."""
+        page = 1
+        page_size = 100
+        total_fetched = 0
+
+        while total_fetched < max_records:
+            data = self.client.get(
+                "/v2/sms/send",
+                params={
+                    "applicationId": app_id,
+                    "limit": page_size,
+                    "page": page,
+                },
+                application_id=app_id,
+            )
+            if data is None:
+                print("    sms/send: not available")
+                return
+
+            sendings = data.get("data", {}).get("sendings", [])
+            if not sendings:
+                break
+
+            self._store_raw(app_id, "/v2/sms/send", data)
+            total_fetched += len(sendings)
+            page += 1
+
+            if len(sendings) < page_size:
+                break
+
+        api_total = data.get("count", 0) if data else 0
+        print(f"    sms/send: {total_fetched} fetched (API total: {api_total:,})")
+
+    def _extract_sending_details(self, app_id: str, sample_size: int = 5):
+        """GET /v2/sms/send/{id} — fetch detail for a sample of sendings.
+
+        Includes campaignSnapshot with full campaign config at send time.
+        """
+        first_page = self.client.get(
+            "/v2/sms/send",
+            params={"applicationId": app_id, "limit": sample_size, "page": 1},
+            application_id=app_id,
+        )
+        if first_page is None:
+            return
+
+        sendings = first_page.get("data", {}).get("sendings", [])
+        fetched = 0
+        for s in sendings[:sample_size]:
+            sid = s.get("id")
+            if sid is None:
+                continue
+            detail = self.client.get(
+                f"/v2/sms/send/{sid}",
+                application_id=app_id,
+            )
+            if detail is not None:
+                self._store_raw(app_id, f"/v2/sms/send/{sid}", detail)
+                fetched += 1
+
+        print(f"    sms/send/{{id}}: {fetched} sending details")
+
+    # ------------------------------------------------------------------
+    # Contacts
+    # ------------------------------------------------------------------
+
+    def _extract_contacts(self, app_id: str, max_records: int = 2000):
+        """GET /v2/sms/contact — paginated SMS contacts (capped for inspection)."""
+        page = 1
+        page_size = 100
+        total_fetched = 0
+
+        while total_fetched < max_records:
+            data = self.client.get(
+                "/v2/sms/contact",
+                params={
+                    "applicationId": app_id,
+                    "limit": page_size,
+                    "page": page,
+                },
+                application_id=app_id,
+            )
+            if data is None:
+                print("    sms/contact: not available")
+                return
+
+            contacts = data.get("data", {}).get("contacts", [])
+            if not contacts:
+                break
+
+            self._store_raw(app_id, "/v2/sms/contact", data)
+            total_fetched += len(contacts)
+            page += 1
+
+            if len(contacts) < page_size:
+                break
+
+        api_total = data.get("count", 0) if data else 0
+        print(f"    sms/contact: {total_fetched} fetched (API total: {api_total:,})")
+
+    # ------------------------------------------------------------------
+    # Topics
+    # ------------------------------------------------------------------
+
+    def _extract_topics(self, app_id: str):
+        """GET /v2/sms/topic — subscription topics/categories."""
+        data = self.client.get(
+            "/v2/sms/topic",
+            params={"applicationId": app_id},
+            application_id=app_id,
+        )
+        if data is not None:
+            self._store_raw(app_id, "/v2/sms/topic", data)
+            count = data.get("count", 0)
+            print(f"    sms/topic: {count} topics")
+        else:
+            print("    sms/topic: not available")
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _date_windows(self):
+        """Yield (start, end) date tuples in <=99-day windows covering the extraction range."""
+        current = self.date_from
+        while current < self.date_to:
+            window_end = min(current + timedelta(days=MAX_STATS_WINDOW_DAYS - 1), self.date_to)
+            yield current, window_end
+            current = window_end + timedelta(days=1)
