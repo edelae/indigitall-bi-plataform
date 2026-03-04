@@ -13,6 +13,7 @@ layout = dbc.Container([
     # Stores
     dcc.Store(id="builder-widgets", storage_type="session", data=[]),
     dcc.Store(id="builder-dashboard-id", storage_type="session"),
+    dcc.Store(id="builder-ai-suggestions", storage_type="memory", data=[]),
 
     # Top bar: name + description + save
     dbc.Row([

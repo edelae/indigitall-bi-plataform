@@ -57,7 +57,7 @@ def _render_assistant_message(text):
 
 
 def _auto_chart(df, chart_type=None):
-    """Generate a simple chart from a DataFrame based on its shape."""
+    """Generate a chart from a DataFrame, respecting AI-suggested chart_type."""
     if df.empty or len(df.columns) < 2:
         return None
 
@@ -76,25 +76,40 @@ def _auto_chart(df, chart_type=None):
 
     label_map = {c: get_label(c) for c in df.columns}
 
-    if chart_type == "line" or "date" in x_col.lower() or "fecha" in x_col.lower():
+    # Determine chart type: AI-suggested > auto-detect
+    if not chart_type:
+        x_lower = x_col.lower()
+        if any(kw in x_lower for kw in ["date", "fecha", "time", "dia", "mes", "month"]):
+            chart_type = "line"
+        elif len(df) <= 8 and len(df.columns) == 2:
+            chart_type = "pie"
+        else:
+            chart_type = "bar"
+
+    if chart_type == "line":
         fig = px.line(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
-    elif chart_type == "pie" or len(df) <= 8:
+    elif chart_type == "pie":
         fig = px.pie(df, names=x_col, values=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
-    elif chart_type == "bar" or df[y_col].dtype in ("int64", "float64"):
-        fig = px.bar(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
+    elif chart_type == "area":
+        fig = px.area(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
+    elif chart_type == "histogram":
+        fig = px.histogram(df, x=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
     else:
         fig = px.bar(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
 
     fig.update_layout(
         template="plotly_white",
         font_family="Inter, sans-serif",
-        margin=dict(l=20, r=20, t=30, b=20),
+        margin=dict(l=40, r=20, t=30, b=50),
         height=350,
+        showlegend=chart_type == "pie",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font_color="#1A1A2E",
-        xaxis_title=get_label(x_col),
-        yaxis_title=get_label(y_col),
+        hoverlabel=dict(bgcolor="#1A1A2E", font_size=13, font_family="Inter"),
+        xaxis=dict(title=get_label(x_col), automargin=True,
+                   tickangle=-45 if len(df) > 6 else 0),
+        yaxis=dict(title=get_label(y_col), automargin=True),
     )
     return fig
 
@@ -487,22 +502,28 @@ def save_query(n_clicks, query_data, tenant):
     prevent_initial_call=True,
 )
 def rerun_from_url(search, current_n, tenant):
-    """If URL has ?rerun=<id>, load the query and auto-execute."""
-    if not search or "rerun=" not in search:
+    """If URL has ?rerun=<id> or ?q=<text>, load the query and auto-execute."""
+    if not search:
         raise PreventUpdate
 
     import urllib.parse
     params = urllib.parse.parse_qs(search.lstrip("?"))
+
+    # ?rerun=<id> — re-execute a saved query
     rerun_id = params.get("rerun", [None])[0]
-    if not rerun_id:
-        raise PreventUpdate
+    if rerun_id:
+        svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
+        query = svc.get_query(int(rerun_id))
+        if not query:
+            raise PreventUpdate
+        return query["query_text"], (current_n or 0) + 1
 
-    svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
-    query = svc.get_query(int(rerun_id))
-    if not query:
-        raise PreventUpdate
+    # ?q=<text> — pre-fill a question and auto-execute
+    question = params.get("q", [None])[0]
+    if question:
+        return question, (current_n or 0) + 1
 
-    return query["query_text"], (current_n or 0) + 1
+    raise PreventUpdate
 
 
 # --- Toggle history panel ---

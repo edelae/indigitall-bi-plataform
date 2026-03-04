@@ -490,11 +490,12 @@ def toggle_builder_ai(n_clicks, is_open):
     return not is_open
 
 
-# --- 10. AI chat in builder — generates NL questions as chips ---
+# --- 10. AI chat in builder — generates clickable NL question chips ---
 
 @callback(
     Output("builder-ai-chat", "children"),
     Output("builder-ai-input", "value"),
+    Output("builder-ai-suggestions", "data"),
     Input("builder-ai-send", "n_clicks"),
     State("builder-ai-input", "value"),
     State("builder-widgets", "data"),
@@ -510,6 +511,8 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
     available_queries = available.get("queries", [])
 
     elements = []
+    suggestion_texts = []
+
     # User message bubble
     elements.append(html.Div([
         html.Small(message, className="fw-semibold"),
@@ -517,7 +520,10 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
         "backgroundColor": "#1E88E5", "color": "white", "borderRadius": "12px",
     }))
 
-    # Try AI service
+    # Collect NL questions from AI or fallback
+    nl_questions = []
+    add_existing_ids = []  # query_ids from saved queries to suggest adding
+
     try:
         from app.services.dashboard_ai_service import DashboardAIService
         ai_svc = DashboardAIService()
@@ -533,56 +539,178 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
             "backgroundColor": "#F5F7FA", "borderRadius": "12px",
         }))
 
-        # Show existing saved queries as clickable add buttons
-        if suggestions:
-            for sug in suggestions:
-                q_id = sug.get("query_id")
-                sug_title = sug.get("title", "")
-                sug_desc = sug.get("description", "")
-                elements.append(html.Div([
-                    html.Small(sug_title, className="fw-semibold d-block"),
-                    html.Small(sug_desc, className="text-muted d-block mb-1"),
-                    dbc.Button(
-                        [html.I(className="bi bi-plus-circle me-1"),
-                         "Agregar al tablero" if q_id else "Crear consulta"],
-                        href=f"/consultas/nueva" if not q_id else None,
-                        id={"type": "builder-add-query", "index": q_id} if q_id else None,
-                        color="primary", size="sm", outline=True,
-                        style={"borderRadius": "6px", "fontSize": "11px"},
-                    ) if q_id else html.Small(
-                        "Crea esta consulta en /consultas/nueva",
-                        className="text-muted fst-italic",
-                    ),
-                ], className="p-2 mb-1", style={
-                    "backgroundColor": "#FAFBFC", "borderRadius": "8px",
-                    "border": "1px solid #F0F0F5",
-                }))
+        # Separate: saved queries to add directly vs NL questions to execute
+        for sug in suggestions:
+            q_id = sug.get("query_id")
+            if q_id:
+                add_existing_ids.append(q_id)
+            sug_title = sug.get("title", "")
+            if sug_title and not q_id:
+                nl_questions.append(sug_title)
+
+        # Also generate NL suggestions based on user description
+        if len(nl_questions) < 3:
+            fallback_qs = _generate_nl_suggestions(message)
+            for q in fallback_qs:
+                if q not in nl_questions and len(nl_questions) < 5:
+                    nl_questions.append(q)
 
     except Exception as e:
         logger.warning("Builder AI failed: %s", e)
-        # Generate NL question suggestions based on user's description
         nl_questions = _generate_nl_suggestions(message)
 
         elements.append(html.Div([
             html.I(className="bi bi-stars me-2", style={"color": "#1E88E5"}),
             html.Small(
                 "Te sugiero estas consultas para tu tablero. "
-                "Crea cada una en Consultas y luego agrégala desde el panel lateral:"
+                "Haz clic en cualquiera para ejecutarla y agregarla como widget:"
             ),
         ], className="p-3 mb-2", style={
             "backgroundColor": "#F5F7FA", "borderRadius": "12px",
         }))
 
-        for q_text in nl_questions:
+    # Render existing saved queries as "Agregar" buttons
+    for q_id in add_existing_ids:
+        q = next((qq for qq in available_queries if qq["id"] == q_id), None)
+        if q:
             elements.append(html.Div([
-                html.I(className="bi bi-chat-dots me-2", style={"color": "#1E88E5"}),
-                html.Small(q_text, className="fw-semibold"),
+                html.Small(q["name"][:50], className="fw-semibold d-block"),
+                dbc.Button(
+                    [html.I(className="bi bi-plus-circle me-1"), "Agregar al tablero"],
+                    id={"type": "builder-add-query", "index": q_id},
+                    color="primary", size="sm", outline=True,
+                    className="mt-1",
+                    style={"borderRadius": "6px", "fontSize": "11px"},
+                ),
             ], className="p-2 mb-1", style={
                 "backgroundColor": "#FAFBFC", "borderRadius": "8px",
-                "border": "1px solid #F0F0F5", "cursor": "pointer",
+                "border": "1px solid #F0F0F5",
             }))
 
-    return elements, ""
+    # Render NL questions as clickable execution chips
+    suggestion_texts = nl_questions[:5]
+    if suggestion_texts:
+        elements.append(html.Small(
+            "Haz clic para ejecutar y agregar al tablero:",
+            className="text-muted d-block mb-2 mt-2",
+            style={"fontSize": "11px"},
+        ))
+    for idx, q_text in enumerate(suggestion_texts):
+        elements.append(
+            dbc.Button(
+                [html.I(className="bi bi-play-circle me-2"), q_text],
+                id={"type": "builder-ai-chip", "index": idx},
+                color="light", size="sm",
+                className="text-start w-100 mb-1",
+                style={
+                    "borderRadius": "8px", "fontSize": "12px",
+                    "border": "1px solid #E4E4E7", "color": "#1A1A2E",
+                },
+            )
+        )
+
+    return elements, "", suggestion_texts
+
+
+# --- 11. Execute AI chip: run NL question, create widget, add to canvas ---
+
+@callback(
+    Output("builder-widgets", "data", allow_duplicate=True),
+    Output("builder-ai-chat", "children", allow_duplicate=True),
+    Input({"type": "builder-ai-chip", "index": ALL}, "n_clicks"),
+    State("builder-ai-suggestions", "data"),
+    State("builder-widgets", "data"),
+    State("tenant-context", "data"),
+    prevent_initial_call=True,
+)
+def execute_ai_chip(n_clicks_list, suggestion_texts, widgets, tenant):
+    """Execute an AI-suggested NL question and add the result as a widget."""
+    if not any(n_clicks_list):
+        raise PreventUpdate
+
+    triggered = ctx.triggered_id
+    if not isinstance(triggered, dict):
+        raise PreventUpdate
+
+    idx = triggered["index"]
+    suggestion_texts = suggestion_texts or []
+    if idx >= len(suggestion_texts):
+        raise PreventUpdate
+
+    question = suggestion_texts[idx]
+
+    # Show loading state
+    loading_msg = html.Div([
+        dbc.Spinner(size="sm", color="primary", className="me-2"),
+        html.Small(f"Ejecutando: {question}...", className="fw-semibold"),
+    ], className="p-3 mb-2", style={
+        "backgroundColor": "#FFF8E1", "borderRadius": "12px",
+    })
+
+    # Execute via AIAgent
+    try:
+        from app.services.data_service import DataService
+        from app.services.ai_agent import AIAgent
+
+        data_svc = DataService()
+        agent = AIAgent(data_svc)
+
+        result = agent.process_query(
+            user_question=question,
+            tenant_filter=tenant or settings.DEFAULT_TENANT,
+        )
+
+        df = result.get("data")
+        if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
+            chart_type = result.get("chart_type") or "bar"
+            query_details = result.get("query_details") or {}
+
+            widget = {
+                "title": question[:60],
+                "type": chart_type,
+                "chart_type": chart_type,
+                "width": 6,
+                "data": df.to_dict("records"),
+                "columns": list(df.columns),
+                "sql": query_details.get("sql", ""),
+                "query_text": question,
+            }
+
+            widgets = widgets or []
+            widgets.append(widget)
+
+            success_msg = html.Div([
+                html.I(className="bi bi-check-circle me-2", style={"color": "#76C043"}),
+                html.Small([
+                    html.Span("Agregado: ", className="fw-semibold"),
+                    question[:50],
+                    html.Span(f" ({len(df)} filas, {chart_type})",
+                              className="text-muted"),
+                ]),
+            ], className="p-2 mb-1", style={
+                "backgroundColor": "#E8F5E9", "borderRadius": "8px",
+            })
+
+            return widgets, success_msg
+        else:
+            explanation = result.get("response", "Sin resultados")
+            error_msg = html.Div([
+                html.I(className="bi bi-info-circle me-2", style={"color": "#FFC107"}),
+                html.Small(f"Sin datos para: {question}. {explanation[:100]}"),
+            ], className="p-2 mb-1", style={
+                "backgroundColor": "#FFF8E1", "borderRadius": "8px",
+            })
+            return no_update, error_msg
+
+    except Exception as e:
+        logger.error("AI chip execution failed: %s", e)
+        error_msg = html.Div([
+            html.I(className="bi bi-exclamation-triangle me-2", style={"color": "#EF4444"}),
+            html.Small(f"Error ejecutando consulta: {str(e)[:100]}"),
+        ], className="p-2 mb-1", style={
+            "backgroundColor": "#FFEBEE", "borderRadius": "8px",
+        })
+        return no_update, error_msg
 
 
 def _generate_nl_suggestions(user_description: str) -> list:
@@ -607,7 +735,6 @@ def _generate_nl_suggestions(user_description: str) -> list:
     if any(kw in desc_lower for kw in ["resumen", "general", "kpi"]):
         suggestions.append("Dame un resumen general de los datos")
 
-    # Always add at least 3 suggestions
     defaults = [
         "Dame un resumen general de los datos",
         "¿Cual es la tendencia de mensajes por dia?",

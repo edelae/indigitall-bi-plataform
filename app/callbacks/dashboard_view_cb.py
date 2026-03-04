@@ -281,13 +281,12 @@ def show_widget_info(n_clicks_list, pathname, tenant):
             )
         )
     elif query_text:
-        # No saved query, but has original question — allow re-running in chat
         import urllib.parse
         encoded_q = urllib.parse.quote(query_text)
         buttons.append(
             dbc.Button(
                 [html.I(className="bi bi-chat-dots me-1"), "Repetir consulta"],
-                href=f"/consultas/nueva",
+                href=f"/consultas/nueva?q={encoded_q}",
                 color="primary", size="sm",
                 style={"borderRadius": "8px"},
                 className="me-2",
