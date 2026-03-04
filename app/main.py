@@ -19,6 +19,14 @@ from app.logging_config import setup_logging
 # --- Logging ---
 setup_logging()
 
+import logging as _logging
+_startup_logger = _logging.getLogger("app.startup")
+_startup_logger.info(
+    "AI keys loaded — OpenAI: %s, Anthropic: %s",
+    "YES" if settings.has_openai_key else "NO",
+    "YES" if settings.has_ai_key else "NO",
+)
+
 # --- Sentry (optional) ---
 if settings.SENTRY_DSN:
     import sentry_sdk

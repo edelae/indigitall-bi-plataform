@@ -38,7 +38,7 @@ def _render_widget(widget, index):
     else:
         df = pd.DataFrame(data)
 
-        if widget_type in ("bar", "line", "pie") and len(df.columns) >= 2:
+        if widget_type in ("bar", "line", "pie", "area", "histogram") and len(df.columns) >= 2:
             x_col, y_col = df.columns[0], df.columns[1]
 
             if df[y_col].dtype == "object":
@@ -59,6 +59,12 @@ def _render_widget(widget, index):
             elif widget_type == "pie":
                 fig = px.pie(df, names=x_col, values=y_col, labels=label_map,
                              color_discrete_sequence=CHART_COLORS)
+            elif widget_type == "area":
+                fig = px.area(df, x=x_col, y=y_col, labels=label_map,
+                              color_discrete_sequence=CHART_COLORS)
+            elif widget_type == "histogram":
+                fig = px.histogram(df, x=y_col, labels=label_map,
+                                   color_discrete_sequence=CHART_COLORS)
             else:
                 fig = px.bar(df, x=x_col, y=y_col, labels=label_map,
                              color_discrete_sequence=CHART_COLORS)
@@ -114,6 +120,9 @@ def _render_widget(widget, index):
                 )
             )
 
+    # Enforce minimum width of 4 Bootstrap columns
+    col_width = max(widget.get("width", 6), 4)
+
     return dbc.Col(
         dbc.Card([
             dbc.CardHeader([
@@ -121,9 +130,9 @@ def _render_widget(widget, index):
                 dbc.Button(
                     html.I(className="bi bi-info-circle"),
                     id={"type": "dv-widget-info", "index": index},
-                    outline=True, color="secondary", size="sm",
-                    style={"padding": "1px 5px", "fontSize": "11px"},
-                    title="Ver informacion",
+                    outline=True, color="primary", size="sm",
+                    style={"padding": "2px 8px", "fontSize": "12px"},
+                    title="Ver informacion y consulta asociada",
                 ),
             ], className="py-2 px-3 bg-white d-flex justify-content-between align-items-center"),
             dbc.CardBody(body_content, className="p-2"),
@@ -131,7 +140,7 @@ def _render_widget(widget, index):
             "borderRadius": "16px", "border": "1px solid #F0F0F5",
             "boxShadow": "0 2px 12px rgba(0,0,0,0.04)",
         }),
-        md=widget.get("width", 6),
+        md=col_width,
         className="mb-3",
     )
 

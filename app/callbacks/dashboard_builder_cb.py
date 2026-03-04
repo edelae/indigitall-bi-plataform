@@ -1,6 +1,7 @@
-"""Dashboard builder callbacks — add/remove/resize widgets, save, AI assistant."""
+"""Dashboard builder callbacks — add/remove/resize widgets, save, edit, AI assistant."""
 
 import json
+import logging
 import pandas as pd
 from dash import (
     Input, Output, State, callback, html, dcc, ctx, no_update, ALL,
@@ -12,6 +13,8 @@ import plotly.express as px
 from app.services.storage_service import StorageService
 from app.services.label_service import get_label
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 CHART_COLORS = ["#1E88E5", "#76C043", "#A0A3BD", "#42A5F5", "#1565C0", "#FFC107", "#9C27B0", "#FF5722"]
 
@@ -49,6 +52,10 @@ def _render_widget_chart(data, chart_type, height=300):
         fig = px.line(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
     elif chart_type == "pie":
         fig = px.pie(df, names=x_col, values=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
+    elif chart_type == "area":
+        fig = px.area(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
+    elif chart_type == "histogram":
+        fig = px.histogram(df, x=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
     else:
         fig = px.bar(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
 
@@ -79,8 +86,8 @@ def _render_canvas(widgets):
 
     cols = []
     for i, w in enumerate(widgets):
-        width = w.get("width", 6)
-        chart_type = w.get("chart_type", "bar")
+        width = max(w.get("width", 6), 4)  # Minimum 4 columns
+        chart_type = w.get("type") or w.get("chart_type", "bar")
         title = w.get("title", "Widget")
         data = w.get("data", [])
 
@@ -102,7 +109,7 @@ def _render_canvas(widgets):
                         outline=True, color="secondary", size="sm",
                         className="me-1",
                         style={"padding": "1px 5px", "fontSize": "11px"},
-                        title="Cambiar tamano",
+                        title=f"Ancho actual: {width}/12",
                     ),
                     dbc.Button(
                         html.I(className="bi bi-x-lg"),
@@ -285,7 +292,7 @@ def render_canvas(widgets):
     return _render_canvas(widgets or [])
 
 
-# --- 6. Save dashboard ---
+# --- 6. Save / Update dashboard ---
 
 @callback(
     Output("builder-save-feedback", "children"),
@@ -294,10 +301,11 @@ def render_canvas(widgets):
     State("builder-name", "value"),
     State("builder-description", "value"),
     State("builder-widgets", "data"),
+    State("builder-dashboard-id", "data"),
     State("tenant-context", "data"),
     prevent_initial_call=True,
 )
-def save_dashboard(n_clicks, name, description, widgets, tenant):
+def save_dashboard(n_clicks, name, description, widgets, existing_id, tenant):
     if not name or not name.strip():
         return dbc.Alert(
             "Por favor ingresa un nombre para el tablero.",
@@ -311,6 +319,24 @@ def save_dashboard(n_clicks, name, description, widgets, tenant):
         ), no_update
 
     svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
+
+    # Update existing dashboard if editing
+    if existing_id:
+        result = svc.update_dashboard_layout(existing_id, widgets)
+        if result.get("success"):
+            return dbc.Alert([
+                html.I(className="bi bi-check-circle me-2"),
+                f"Tablero \"{name}\" actualizado exitosamente. ",
+                html.A("Ver tablero", href=f"/tableros/saved/{existing_id}",
+                       className="alert-link"),
+            ], color="success", duration=5000, dismissable=True), existing_id
+
+        return dbc.Alert(
+            "Error actualizando el tablero. Intenta de nuevo.",
+            color="danger", duration=3000, dismissable=True,
+        ), no_update
+
+    # Create new dashboard
     result = svc.save_dashboard(
         name=name.strip(),
         description=description.strip() if description else None,
@@ -331,53 +357,67 @@ def save_dashboard(n_clicks, name, description, widgets, tenant):
     ), no_update
 
 
-# --- 7. Pre-load query from URL ---
+# --- 7. Load from URL: ?query_id=<id> or ?edit=<dashboard_id> ---
 
 @callback(
     Output("builder-widgets", "data", allow_duplicate=True),
+    Output("builder-name", "value"),
+    Output("builder-description", "value"),
+    Output("builder-dashboard-id", "data", allow_duplicate=True),
     Input("builder-url", "search"),
     State("builder-widgets", "data"),
     State("tenant-context", "data"),
     prevent_initial_call=True,
 )
-def pre_load_query(search, widgets, tenant):
-    if not search or "query_id=" not in search:
+def load_from_url(search, widgets, tenant):
+    if not search:
         raise PreventUpdate
 
     import urllib.parse
     params = urllib.parse.parse_qs(search.lstrip("?"))
-    query_id = params.get("query_id", [None])[0]
-    if not query_id:
-        raise PreventUpdate
-
     svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
-    query = svc.get_query(int(query_id))
-    if not query:
-        raise PreventUpdate
 
-    viz = query.get("visualizations") or []
-    chart_type = viz[0].get("type", "bar") if viz else "bar"
+    # --- Edit existing dashboard ---
+    edit_id = params.get("edit", [None])[0]
+    if edit_id:
+        dashboard = svc.get_dashboard(int(edit_id))
+        if not dashboard:
+            raise PreventUpdate
 
-    widget = {
-        "query_id": int(query_id),
-        "title": query["name"][:60],
-        "type": chart_type,
-        "chart_type": chart_type,
-        "width": 6,
-        "data": query.get("result_data") or [],
-        "columns": [c["name"] for c in (query.get("result_columns") or [])],
-        "sql": query.get("generated_sql") or "",
-        "query_text": query.get("query_text") or "",
-    }
+        loaded_widgets = dashboard.get("layout") or []
+        name = dashboard.get("name", "")
+        description = dashboard.get("description") or ""
+        return loaded_widgets, name, description, int(edit_id)
 
-    widgets = widgets or []
+    # --- Pre-load a single query ---
+    query_id = params.get("query_id", [None])[0]
+    if query_id:
+        query = svc.get_query(int(query_id))
+        if not query:
+            raise PreventUpdate
 
-    # Avoid duplicates
-    if any(w.get("query_id") == int(query_id) for w in widgets):
-        raise PreventUpdate
+        viz = query.get("visualizations") or []
+        chart_type = viz[0].get("type", "bar") if viz else "bar"
 
-    widgets.append(widget)
-    return widgets
+        widget = {
+            "query_id": int(query_id),
+            "title": query["name"][:60],
+            "type": chart_type,
+            "chart_type": chart_type,
+            "width": 6,
+            "data": query.get("result_data") or [],
+            "columns": [c["name"] for c in (query.get("result_columns") or [])],
+            "sql": query.get("generated_sql") or "",
+            "query_text": query.get("query_text") or "",
+        }
+
+        widgets = widgets or []
+        if not any(w.get("query_id") == int(query_id) for w in widgets):
+            widgets.append(widget)
+
+        return widgets, no_update, no_update, no_update
+
+    raise PreventUpdate
 
 
 # --- 8. Show widget SQL info ---
@@ -450,7 +490,7 @@ def toggle_builder_ai(n_clicks, is_open):
     return not is_open
 
 
-# --- 10. AI chat in builder ---
+# --- 10. AI chat in builder — generates NL questions as chips ---
 
 @callback(
     Output("builder-ai-chat", "children"),
@@ -465,26 +505,24 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
     if not message or not message.strip():
         raise PreventUpdate
 
-    # Use DashboardAIService if available, otherwise provide helpful suggestions
+    svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
+    available = svc.list_queries(limit=20)
+    available_queries = available.get("queries", [])
+
+    elements = []
+    # User message bubble
+    elements.append(html.Div([
+        html.Small(message, className="fw-semibold"),
+    ], className="p-2 mb-2 text-end", style={
+        "backgroundColor": "#1E88E5", "color": "white", "borderRadius": "12px",
+    }))
+
+    # Try AI service
     try:
         from app.services.dashboard_ai_service import DashboardAIService
         ai_svc = DashboardAIService()
-
-        svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
-        available = svc.list_queries(limit=20)
-        available_queries = available.get("queries", [])
-
         result = ai_svc.suggest_dashboard(message, available_queries, widgets or [])
 
-        elements = []
-        # User message
-        elements.append(html.Div([
-            html.Small(message, className="fw-semibold"),
-        ], className="p-2 mb-2 text-end", style={
-            "backgroundColor": "#1E88E5", "color": "white", "borderRadius": "12px",
-        }))
-
-        # AI response
         response_text = result.get("response", "")
         suggestions = result.get("suggestions", [])
 
@@ -495,41 +533,90 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
             "backgroundColor": "#F5F7FA", "borderRadius": "12px",
         }))
 
+        # Show existing saved queries as clickable add buttons
         if suggestions:
             for sug in suggestions:
+                q_id = sug.get("query_id")
+                sug_title = sug.get("title", "")
+                sug_desc = sug.get("description", "")
                 elements.append(html.Div([
-                    html.Small(sug.get("title", ""), className="fw-semibold d-block"),
-                    html.Small(sug.get("description", ""), className="text-muted"),
+                    html.Small(sug_title, className="fw-semibold d-block"),
+                    html.Small(sug_desc, className="text-muted d-block mb-1"),
+                    dbc.Button(
+                        [html.I(className="bi bi-plus-circle me-1"),
+                         "Agregar al tablero" if q_id else "Crear consulta"],
+                        href=f"/consultas/nueva" if not q_id else None,
+                        id={"type": "builder-add-query", "index": q_id} if q_id else None,
+                        color="primary", size="sm", outline=True,
+                        style={"borderRadius": "6px", "fontSize": "11px"},
+                    ) if q_id else html.Small(
+                        "Crea esta consulta en /consultas/nueva",
+                        className="text-muted fst-italic",
+                    ),
                 ], className="p-2 mb-1", style={
                     "backgroundColor": "#FAFBFC", "borderRadius": "8px",
                     "border": "1px solid #F0F0F5",
                 }))
 
-        return elements, ""
+    except Exception as e:
+        logger.warning("Builder AI failed: %s", e)
+        # Generate NL question suggestions based on user's description
+        nl_questions = _generate_nl_suggestions(message)
 
-    except ImportError:
-        # Fallback: provide static suggestions
-        elements = [
-            html.Div([
-                html.Small(message, className="fw-semibold"),
-            ], className="p-2 mb-2 text-end", style={
-                "backgroundColor": "#1E88E5", "color": "white", "borderRadius": "12px",
-            }),
-            html.Div([
-                html.I(className="bi bi-stars me-2", style={"color": "#1E88E5"}),
-                html.Small(
-                    "Para crear un tablero completo, te recomiendo agregar estas consultas "
-                    "desde el panel lateral:"
-                ),
-                html.Ul([
-                    html.Li(html.Small("Resumen general de KPIs")),
-                    html.Li(html.Small("Tendencia de mensajes en el tiempo")),
-                    html.Li(html.Small("Distribucion por tipo (Bot/Humano)")),
-                    html.Li(html.Small("Top contactos activos")),
-                    html.Li(html.Small("Rendimiento de agentes")),
-                ], className="mt-2 mb-0", style={"fontSize": "12px"}),
-            ], className="p-3", style={
-                "backgroundColor": "#F5F7FA", "borderRadius": "12px",
-            }),
-        ]
-        return elements, ""
+        elements.append(html.Div([
+            html.I(className="bi bi-stars me-2", style={"color": "#1E88E5"}),
+            html.Small(
+                "Te sugiero estas consultas para tu tablero. "
+                "Crea cada una en Consultas y luego agrégala desde el panel lateral:"
+            ),
+        ], className="p-3 mb-2", style={
+            "backgroundColor": "#F5F7FA", "borderRadius": "12px",
+        }))
+
+        for q_text in nl_questions:
+            elements.append(html.Div([
+                html.I(className="bi bi-chat-dots me-2", style={"color": "#1E88E5"}),
+                html.Small(q_text, className="fw-semibold"),
+            ], className="p-2 mb-1", style={
+                "backgroundColor": "#FAFBFC", "borderRadius": "8px",
+                "border": "1px solid #F0F0F5", "cursor": "pointer",
+            }))
+
+    return elements, ""
+
+
+def _generate_nl_suggestions(user_description: str) -> list:
+    """Generate relevant NL question suggestions based on user's description."""
+    desc_lower = user_description.lower()
+    suggestions = []
+
+    if any(kw in desc_lower for kw in ["tendencia", "tiempo", "evolucion", "diario"]):
+        suggestions.append("¿Cual es la tendencia de mensajes por dia?")
+    if any(kw in desc_lower for kw in ["canal", "whatsapp", "sms", "email"]):
+        suggestions.append("¿Que canal tiene mayor volumen de mensajes?")
+    if any(kw in desc_lower for kw in ["agente", "rendimiento", "equipo"]):
+        suggestions.append("¿Cual es el rendimiento de los agentes?")
+    if any(kw in desc_lower for kw in ["contacto", "cliente", "usuario"]):
+        suggestions.append("¿Cuales son los contactos mas activos?")
+    if any(kw in desc_lower for kw in ["hora", "horario", "pico"]):
+        suggestions.append("¿Cual es el horario pico de mensajes?")
+    if any(kw in desc_lower for kw in ["fallback", "bot", "chatbot"]):
+        suggestions.append("¿Cual es la tasa de fallback del bot?")
+    if any(kw in desc_lower for kw in ["semana", "dia de la semana"]):
+        suggestions.append("¿Que dia de la semana tiene mas mensajes?")
+    if any(kw in desc_lower for kw in ["resumen", "general", "kpi"]):
+        suggestions.append("Dame un resumen general de los datos")
+
+    # Always add at least 3 suggestions
+    defaults = [
+        "Dame un resumen general de los datos",
+        "¿Cual es la tendencia de mensajes por dia?",
+        "¿Cuales son los contactos mas activos?",
+        "¿Cual es el rendimiento de los agentes?",
+        "¿Cual es la tasa de fallback del bot?",
+    ]
+    for d in defaults:
+        if d not in suggestions and len(suggestions) < 5:
+            suggestions.append(d)
+
+    return suggestions[:5]

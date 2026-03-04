@@ -126,10 +126,20 @@ Para ANALYTICS (funciones pre-built):
 {{"type": "analytics", "function": "NOMBRE_DE_FUNCION", "explanation": "Explicación con insight de negocio"}}
 
 Para SQL (consultas ad-hoc):
-{{"type": "sql", "query": "SELECT ... FROM ... WHERE tenant_id = '{{TENANT_ID}}' ...", "explanation": "Qué muestra esta consulta"}}
+{{"type": "sql", "query": "SELECT ... FROM ... WHERE tenant_id = '{{TENANT_ID}}' ...", "chart_type": "bar|line|pie|table|histogram|area", "title": "Título de la gráfica", "explanation": "Qué muestra esta consulta"}}
 
 Para CLARIFICATION (cuando necesitas más info):
 {{"type": "clarification", "response": "Tu pregunta específica para el usuario"}}
+
+=== SELECCIÓN DE TIPO DE GRÁFICA (chart_type) ===
+Cuando devuelvas tipo "sql", SIEMPRE incluye chart_type con el tipo más adecuado:
+- "line" — datos temporales/tendencias (fecha en eje X)
+- "bar" — comparación entre categorías discretas
+- "pie" — proporciones/distribuciones (máximo 8 categorías)
+- "table" — datos tabulares detallados, KPIs, o muchas columnas
+- "histogram" — distribución de valores numéricos continuos
+- "area" — tendencias acumuladas o series de tiempo con volumen
+Si el usuario pide explícitamente un tipo de gráfica, RESPETA su elección siempre.
 
 === FUNCIONES DISPONIBLES ===
 IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
@@ -157,6 +167,7 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 - SIEMPRE incluir LIMIT (máximo 1000)
 - Usa aggregate functions cuando sea posible
 - Prefiere funciones pre-built antes de SQL
+- Nombra las columnas con alias legibles en español cuando sea posible (ej: AS "Fecha", AS "Total Mensajes")
 
 === REGLAS GENERALES ===
 1. Si la pregunta encaja en una función pre-built, úsala (tipo "analytics")
@@ -301,7 +312,12 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
             if resp_type == "sql":
                 raw_sql = response_json.get("query", "")
                 explanation = response_json.get("explanation", "")
-                return self._execute_guarded_sql(raw_sql, explanation, tenant_filter)
+                ai_chart = response_json.get("chart_type")
+                ai_title = response_json.get("title")
+                return self._execute_guarded_sql(
+                    raw_sql, explanation, tenant_filter,
+                    chart_type=ai_chart, title=ai_title,
+                )
 
             # Unrecognized type
             return None
@@ -407,7 +423,12 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
             if resp_type == "sql":
                 raw_sql = response_json.get("query", "")
                 explanation = response_json.get("explanation", "")
-                return self._execute_guarded_sql(raw_sql, explanation, tenant_filter)
+                ai_chart = response_json.get("chart_type")
+                ai_title = response_json.get("title")
+                return self._execute_guarded_sql(
+                    raw_sql, explanation, tenant_filter,
+                    chart_type=ai_chart, title=ai_title,
+                )
 
             return None
 
@@ -445,6 +466,8 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
         raw_sql: str,
         explanation: str,
         tenant_filter: Optional[str] = None,
+        chart_type: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute AI-generated SQL with safety guardrails."""
 
@@ -503,21 +526,43 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                 df = pd.read_sql(text(sql), conn)
 
             row_count = len(df)
+            # Use AI-suggested chart type, or auto-detect from data
+            resolved_chart = chart_type or self._auto_detect_chart_type(df)
             return {
                 "type": "analytics",
                 "response": explanation,
                 "data": df,
-                "chart_type": "table",
+                "chart_type": resolved_chart,
                 "query_details": {
                     "function": "sql_query",
                     "sql": sql,
                     "rows_returned": row_count,
+                    "title": title,
                 },
             }
 
         except Exception as e:
             logger.warning("SQL execution failed: %s — Query: %s", e, sql)
             return self._sql_error(f"Error ejecutando la consulta: {str(e)[:200]}")
+
+    @staticmethod
+    def _auto_detect_chart_type(df: pd.DataFrame) -> str:
+        """Auto-detect best chart type from DataFrame shape and content."""
+        if df.empty or len(df.columns) < 2:
+            return "table"
+        x_col = df.columns[0]
+        x_lower = x_col.lower()
+        n_rows = len(df)
+        # Temporal data → line
+        if any(kw in x_lower for kw in ["date", "fecha", "time", "dia", "mes", "month", "week"]):
+            return "line"
+        # Few categories → pie
+        if n_rows <= 6 and len(df.columns) == 2:
+            return "pie"
+        # Many columns or many rows → table
+        if len(df.columns) > 4 or n_rows > 50:
+            return "table"
+        return "bar"
 
     @staticmethod
     def _sql_error(message: str) -> Dict[str, Any]:

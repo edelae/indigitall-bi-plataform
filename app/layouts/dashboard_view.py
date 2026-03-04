@@ -13,6 +13,8 @@ dash.register_page(
 
 
 def layout(dashboard_id=None, **kwargs):
+    edit_href = f"/tableros/nuevo?edit={dashboard_id}" if dashboard_id else "/tableros/nuevo"
+
     return dbc.Container([
         # Stores
         dcc.Store(id="dv-dashboard-id", data=dashboard_id),
@@ -28,9 +30,11 @@ def layout(dashboard_id=None, **kwargs):
                            className="text-muted"),
             ]),
             html.Div([
-                dbc.Button([html.I(className="bi bi-pencil me-1"), "Editar"],
-                           id="dv-edit-btn",
-                           outline=True, color="secondary", size="sm", className="me-2"),
+                dbc.Button(
+                    [html.I(className="bi bi-pencil me-1"), "Editar"],
+                    href=edit_href,
+                    outline=True, color="secondary", size="sm", className="me-2",
+                ),
                 dbc.Button(html.I(className="bi bi-star"),
                            id="dv-fav-btn",
                            outline=True, color="warning", size="sm"),

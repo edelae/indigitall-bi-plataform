@@ -116,6 +116,7 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-your-super-secret-password}@db:5432/postgres
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-dev-secret-change-in-production}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       DEFAULT_TENANT: ${DEFAULT_TENANT:-demo}
       DEBUG: ${DEBUG:-true}
