@@ -3,8 +3,11 @@
 import pandas as pd
 from sqlalchemy import text
 from typing import List, Dict, Any, Optional
+import logging
 
 from app.models.database import engine
+
+logger = logging.getLogger(__name__)
 
 # Tables allowed in the Data Explorer (whitelist for security)
 ALLOWED_TABLES = {
@@ -13,6 +16,16 @@ ALLOWED_TABLES = {
     "saved_queries", "dashboards", "sync_state",
     "chat_conversations",
 }
+
+# Analytics schema tables (always allowed for exploration)
+ANALYTICS_TABLES = {
+    "fact_message_events", "dim_date", "dim_time", "dim_channel",
+    "dim_event_type", "dim_tenant", "dim_contact", "dim_agent",
+    "dim_campaign", "dim_conversation",
+}
+
+# Schemas to explore
+ALLOWED_SCHEMAS = ["public", "public_analytics"]
 
 
 class SchemaService:
@@ -24,10 +37,12 @@ class SchemaService:
             SELECT
                 t.table_name,
                 COALESCE(s.n_live_tup, 0) AS row_count,
-                pg_size_pretty(pg_total_relation_size(quote_ident(t.table_name))) AS size
+                pg_size_pretty(pg_total_relation_size(
+                    quote_ident(t.table_schema) || '.' || quote_ident(t.table_name)
+                )) AS size
             FROM information_schema.tables t
             LEFT JOIN pg_stat_user_tables s
-                ON s.relname = t.table_name
+                ON s.relname = t.table_name AND s.schemaname = t.table_schema
             WHERE t.table_schema = 'public'
               AND t.table_type = 'BASE TABLE'
               AND t.table_name NOT LIKE 'pg_%'
@@ -37,14 +52,43 @@ class SchemaService:
         with engine.connect() as conn:
             rows = conn.execute(query).fetchall()
         return [
-            {"table_name": r.table_name, "row_count": r.row_count, "size": r.size}
+            {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public"}
             for r in rows
             if r.table_name in ALLOWED_TABLES
         ]
 
-    def get_table_schema(self, table_name: str) -> List[Dict[str, Any]]:
+    def list_analytics_tables(self) -> List[Dict[str, Any]]:
+        """List analytics schema tables with row counts."""
+        query = text("""
+            SELECT
+                t.table_name,
+                COALESCE(s.n_live_tup, 0) AS row_count,
+                pg_size_pretty(pg_total_relation_size(
+                    quote_ident(t.table_schema) || '.' || quote_ident(t.table_name)
+                )) AS size
+            FROM information_schema.tables t
+            LEFT JOIN pg_stat_user_tables s
+                ON s.relname = t.table_name AND s.schemaname = t.table_schema
+            WHERE t.table_schema = 'public_analytics'
+              AND t.table_type = 'BASE TABLE'
+            ORDER BY COALESCE(s.n_live_tup, 0) DESC
+        """)
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(query).fetchall()
+            return [
+                {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public_analytics"}
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to list analytics tables: %s", e)
+            return []
+
+    def get_table_schema(self, table_name: str, schema: str = "public") -> List[Dict[str, Any]]:
         """Get column definitions for a table."""
-        if table_name not in ALLOWED_TABLES:
+        if schema == "public" and table_name not in ALLOWED_TABLES:
+            return []
+        if schema == "public_analytics" and table_name not in ANALYTICS_TABLES:
             return []
         query = text("""
             SELECT
@@ -54,12 +98,12 @@ class SchemaService:
                 c.column_default,
                 c.ordinal_position
             FROM information_schema.columns c
-            WHERE c.table_schema = 'public'
+            WHERE c.table_schema = :schema
               AND c.table_name = :table_name
             ORDER BY c.ordinal_position
         """)
         with engine.connect() as conn:
-            rows = conn.execute(query, {"table_name": table_name}).fetchall()
+            rows = conn.execute(query, {"table_name": table_name, "schema": schema}).fetchall()
         return [
             {
                 "column_name": r.column_name,
@@ -70,26 +114,25 @@ class SchemaService:
             for r in rows
         ]
 
-    def preview_table(self, table_name: str, limit: int = 50) -> pd.DataFrame:
+    def preview_table(self, table_name: str, limit: int = 50, schema: str = "public") -> pd.DataFrame:
         """Return the first N rows of a table. Uses whitelist validation."""
-        if table_name not in ALLOWED_TABLES:
+        if schema == "public" and table_name not in ALLOWED_TABLES:
+            return pd.DataFrame()
+        if schema == "public_analytics" and table_name not in ANALYTICS_TABLES:
             return pd.DataFrame()
         limit = min(limit, 200)
-        # Safe: table_name is validated against whitelist
-        query = text(f'SELECT * FROM "{table_name}" LIMIT :lim')
+        qualified = f'"{schema}"."{table_name}"'
+        query = text(f'SELECT * FROM {qualified} LIMIT :lim')
         with engine.connect() as conn:
             return pd.read_sql(query, conn, params={"lim": limit})
 
     def get_table_profile(self, table_name: str) -> List[Dict[str, Any]]:
-        """Compute basic profiling stats per column: null %, distinct count, min, max."""
+        """Compute basic profiling stats per column."""
         if table_name not in ALLOWED_TABLES:
             return []
-
         columns = self.get_table_schema(table_name)
         if not columns:
             return []
-
-        # Build a single query that computes stats for each column
         parts = []
         for col in columns:
             cn = col["column_name"]
@@ -102,27 +145,21 @@ class SchemaService:
                     'total_count', COUNT(*)
                 )
             """)
-
         if not parts:
             return []
-
         agg_expr = ", ".join(parts)
         query = text(f'SELECT jsonb_build_array({agg_expr}) AS profile FROM "{table_name}"')
-
         with engine.connect() as conn:
             row = conn.execute(query).first()
-
         if not row or not row.profile:
             return []
-
         return row.profile
 
     def get_sync_status(self) -> List[Dict[str, Any]]:
-        """Return sync_state rows for the status banner."""
+        """Return sync_state rows."""
         query = text("""
             SELECT entity, last_sync_at, records_synced, status, tenant_id
-            FROM sync_state
-            ORDER BY entity
+            FROM sync_state ORDER BY entity
         """)
         with engine.connect() as conn:
             rows = conn.execute(query).fetchall()
@@ -138,17 +175,16 @@ class SchemaService:
         ]
 
     def list_all_tables_with_columns(self) -> List[Dict[str, Any]]:
-        """List all allowed tables with their columns in a single call (for Redash-style sidebar)."""
-        tables = self.list_tables()
+        """List all allowed tables with their columns (public + analytics)."""
         result = []
-        for t in tables:
-            cols = self.get_table_schema(t["table_name"])
-            result.append({
-                "table_name": t["table_name"],
-                "row_count": t["row_count"],
-                "size": t["size"],
-                "columns": cols,
-            })
+        # Public schema tables
+        for t in self.list_tables():
+            cols = self.get_table_schema(t["table_name"], "public")
+            result.append({**t, "columns": cols})
+        # Analytics schema tables
+        for t in self.list_analytics_tables():
+            cols = self.get_table_schema(t["table_name"], "public_analytics")
+            result.append({**t, "columns": cols})
         return result
 
     def get_table_indexes(self, table_name: str) -> List[Dict[str, str]]:
@@ -158,8 +194,7 @@ class SchemaService:
         query = text("""
             SELECT indexname, indexdef
             FROM pg_indexes
-            WHERE tablename = :table_name
-              AND schemaname = 'public'
+            WHERE tablename = :table_name AND schemaname = 'public'
             ORDER BY indexname
         """)
         with engine.connect() as conn:

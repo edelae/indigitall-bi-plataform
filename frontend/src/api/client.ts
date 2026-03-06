@@ -127,10 +127,10 @@ export async function listTables(): Promise<TableInfo[]> {
   return request('/schema/tables')
 }
 
-export async function previewTable(name: string, limit = 50): Promise<{
+export async function previewTable(name: string, limit = 50, schema = 'public'): Promise<{
   columns: string[]
   data: Record<string, any>[]
   total: number
 }> {
-  return request(`/schema/tables/${name}/preview?limit=${limit}`)
+  return request(`/schema/tables/${name}/preview?limit=${limit}&schema=${schema}`)
 }

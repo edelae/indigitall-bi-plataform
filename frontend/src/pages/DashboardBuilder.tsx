@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
   Save, ArrowLeft, Plus, X, Info, Loader2,
-  Sparkles, Send, Play, GripVertical,
+  Sparkles, Send, GripVertical, LayoutTemplate,
+  Type, Link as LinkIcon, Pencil,
 } from 'lucide-react'
 import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
-import type { DashboardWidget, SavedQuery, ChartType } from '../types'
+import KpiCard from '../components/KpiCard'
+import type { DashboardWidget, SavedQuery, ChartType, GridTemplate } from '../types'
+import { GRID_TEMPLATES, PRIMARY_COLOR } from '../types'
 import {
   listQueries, getQuery, getDashboard,
   saveDashboard, updateDashboard, sendChat,
@@ -26,6 +29,7 @@ export default function DashboardBuilder() {
   const [queries, setQueries] = useState<SavedQuery[]>([])
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [querySearch, setQuerySearch] = useState('')
 
   // AI Assistant
   const [aiOpen, setAiOpen] = useState(false)
@@ -33,19 +37,25 @@ export default function DashboardBuilder() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiMessages, setAiMessages] = useState<{ role: string; content: string }[]>([])
 
+  // Templates
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const [activeTemplate, setActiveTemplate] = useState<GridTemplate | null>(null)
+
   // SQL Modal
   const [sqlModal, setSqlModal] = useState<{ title: string; sql: string; queryText: string } | null>(null)
 
+  // Edit widget title
+  const [editingTitle, setEditingTitle] = useState<string | null>(null)
+
   // Load available queries
   useEffect(() => {
-    listQueries({ limit: 30 }).then(r => setQueries(r.queries)).catch(() => {})
+    listQueries({ limit: 100 }).then(r => setQueries(r.queries)).catch(() => {})
   }, [])
 
   // Load existing dashboard or preload query
   useEffect(() => {
     const editId = searchParams.get('edit')
     const queryId = searchParams.get('query_id')
-
     if (editId) {
       getDashboard(parseInt(editId)).then(d => {
         setName(d.name)
@@ -81,20 +91,60 @@ export default function DashboardBuilder() {
         columns: (q.result_columns || []).map(c => c.name),
         sql: q.generated_sql || '',
         query_text: q.query_text || '',
-        grid_i: `widget-${idx}`,
+        grid_i: `widget-${Date.now()}-${idx}`,
         grid_x: (idx % 2) * 6,
-        grid_y: Math.floor(idx / 2) * 4,
+        grid_y: 999,
         grid_w: 6,
         grid_h: 4,
       }
       setWidgets(prev => [...prev, newWidget])
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
 
-  const removeWidget = (index: number) => {
-    setWidgets(prev => prev.filter((_, i) => i !== index))
+  const addTitleBlock = () => {
+    const idx = widgets.length
+    const newWidget: DashboardWidget = {
+      title: 'Titulo de seccion',
+      type: 'title',
+      is_title_block: true,
+      text_content: 'Escribe aqui el titulo o descripcion',
+      width: 12,
+      data: [],
+      columns: [],
+      grid_i: `title-${Date.now()}-${idx}`,
+      grid_x: 0,
+      grid_y: 999,
+      grid_w: 12,
+      grid_h: 2,
+    }
+    setWidgets(prev => [...prev, newWidget])
+  }
+
+  const addTextCard = () => {
+    const idx = widgets.length
+    const newWidget: DashboardWidget = {
+      title: 'Tarjeta informativa',
+      type: 'text_card',
+      text_content: 'Informacion, enlaces o notas para el dashboard',
+      text_url: '',
+      width: 4,
+      data: [],
+      columns: [],
+      grid_i: `text-${Date.now()}-${idx}`,
+      grid_x: 0,
+      grid_y: 999,
+      grid_w: 4,
+      grid_h: 3,
+    }
+    setWidgets(prev => [...prev, newWidget])
+  }
+
+  const removeWidget = (gridI: string) => {
+    setWidgets(prev => prev.filter(w => w.grid_i !== gridI))
+  }
+
+  const updateWidgetField = (gridI: string, field: string, value: any) => {
+    setWidgets(prev => prev.map(w => w.grid_i === gridI ? { ...w, [field]: value } : w))
   }
 
   const handleLayoutChange = useCallback((layout: any[]) => {
@@ -105,11 +155,7 @@ export default function DashboardBuilder() {
         if (idx >= 0) {
           updated[idx] = {
             ...updated[idx],
-            grid_x: item.x,
-            grid_y: item.y,
-            grid_w: item.w,
-            grid_h: item.h,
-            width: item.w,
+            grid_x: item.x, grid_y: item.y, grid_w: item.w, grid_h: item.h, width: item.w,
           }
         }
       }
@@ -118,15 +164,8 @@ export default function DashboardBuilder() {
   }, [])
 
   const handleSave = async () => {
-    if (!name.trim()) {
-      setFeedback({ type: 'error', text: 'Ingresa un nombre para el tablero' })
-      return
-    }
-    if (!widgets.length) {
-      setFeedback({ type: 'error', text: 'Agrega al menos un widget' })
-      return
-    }
-
+    if (!name.trim()) { setFeedback({ type: 'error', text: 'Ingresa un nombre' }); return }
+    if (!widgets.length) { setFeedback({ type: 'error', text: 'Agrega al menos un widget' }); return }
     setSaving(true)
     try {
       if (dashboardId) {
@@ -138,7 +177,7 @@ export default function DashboardBuilder() {
         setFeedback({ type: 'success', text: 'Tablero guardado' })
       }
     } catch {
-      setFeedback({ type: 'error', text: 'Error guardando el tablero' })
+      setFeedback({ type: 'error', text: 'Error guardando' })
     } finally {
       setSaving(false)
       setTimeout(() => setFeedback(null), 4000)
@@ -152,25 +191,28 @@ export default function DashboardBuilder() {
       const result = await sendChat(question)
       if (result.data?.length) {
         const idx = widgets.length
+        const isKpi = result.chart_type === 'kpi' || question.toLowerCase().includes('kpi') || question.toLowerCase().includes('tarjeta')
         const newWidget: DashboardWidget = {
-          title: question.slice(0, 60),
-          type: result.chart_type || 'bar',
+          title: result.query_details?.title || question.slice(0, 60),
+          type: isKpi ? 'kpi' : (result.chart_type || 'bar'),
           chart_type: result.chart_type || 'bar',
-          width: 6,
+          width: isKpi ? 3 : 6,
           data: result.data,
           columns: result.columns,
           sql: result.query_details?.sql || '',
           query_text: question,
-          grid_i: `widget-${idx}`,
-          grid_x: (idx % 2) * 6,
+          grid_i: `ai-${Date.now()}-${idx}`,
+          grid_x: 0,
           grid_y: 999,
-          grid_w: 6,
-          grid_h: 4,
+          grid_w: isKpi ? 3 : 6,
+          grid_h: isKpi ? 2 : 4,
+          kpi_value: isKpi && result.data[0] ? result.data[0][result.columns[1]] || result.data[0][result.columns[0]] : undefined,
+          kpi_label: isKpi ? (result.query_details?.title || question.slice(0, 40)) : undefined,
         }
         setWidgets(prev => [...prev, newWidget])
         setAiMessages(prev => [...prev, { role: 'system', content: `Agregado: "${question}" (${result.data.length} filas)` }])
       } else {
-        setAiMessages(prev => [...prev, { role: 'system', content: `Sin datos para: "${question}"` }])
+        setAiMessages(prev => [...prev, { role: 'assistant', content: result.response || `Sin datos para: "${question}"` }])
       }
     } catch (err: any) {
       setAiMessages(prev => [...prev, { role: 'system', content: `Error: ${err.message}` }])
@@ -187,15 +229,24 @@ export default function DashboardBuilder() {
     executeAiQuestion(msg)
   }
 
+  const applyTemplate = (tmpl: GridTemplate) => {
+    setActiveTemplate(tmpl)
+    setTemplateOpen(false)
+  }
+
   const gridLayout = widgets.map(w => ({
     i: w.grid_i,
     x: w.grid_x,
     y: w.grid_y,
     w: w.grid_w,
     h: w.grid_h,
-    minW: 3,
-    minH: 3,
+    minW: 2,
+    minH: 2,
   }))
+
+  const filteredQueries = querySearch
+    ? queries.filter(q => q.name.toLowerCase().includes(querySearch.toLowerCase()))
+    : queries
 
   return (
     <div className="animate-fade-in">
@@ -216,6 +267,22 @@ export default function DashboardBuilder() {
           />
         </div>
         <div className="flex gap-2">
+          {/* Templates button */}
+          <button
+            onClick={() => setTemplateOpen(!templateOpen)}
+            className="btn-secondary flex items-center gap-1.5 text-sm"
+            title="Templates de organizacion"
+          >
+            <LayoutTemplate size={14} /> Templates
+          </button>
+          {/* Add title block */}
+          <button onClick={addTitleBlock} className="btn-secondary flex items-center gap-1.5 text-sm" title="Agregar titulo">
+            <Type size={14} /> Titulo
+          </button>
+          {/* Add text card */}
+          <button onClick={addTextCard} className="btn-secondary flex items-center gap-1.5 text-sm" title="Agregar tarjeta de texto">
+            <LinkIcon size={14} /> Tarjeta
+          </button>
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-1.5 text-sm">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             {dashboardId ? 'Actualizar' : 'Guardar'}
@@ -228,9 +295,7 @@ export default function DashboardBuilder() {
 
       {/* Feedback */}
       {feedback && (
-        <div className={`mb-4 px-4 py-2 rounded-btn text-sm ${
-          feedback.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-        }`}>
+        <div className={`mb-4 px-4 py-2 rounded-btn text-sm ${feedback.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
           {feedback.text}
           {feedback.type === 'success' && dashboardId && (
             <Link to={`/tableros/saved/${dashboardId}`} className="ml-2 underline">Ver tablero</Link>
@@ -238,21 +303,70 @@ export default function DashboardBuilder() {
         </div>
       )}
 
+      {/* Templates panel */}
+      {templateOpen && (
+        <div className="mb-4 card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold">Plantillas de organizacion</h3>
+            <button onClick={() => setTemplateOpen(false)} className="btn-icon p-1"><X size={14} /></button>
+          </div>
+          <div className="grid grid-cols-4 md:grid-cols-7 gap-3">
+            {GRID_TEMPLATES.map(tmpl => (
+              <button
+                key={tmpl.id}
+                onClick={() => applyTemplate(tmpl)}
+                className={`border rounded-btn p-2 hover:border-primary/50 transition-colors ${activeTemplate?.id === tmpl.id ? 'border-primary bg-primary/5' : 'border-border-light'}`}
+              >
+                {/* Mini grid preview */}
+                <div className="relative w-full aspect-[3/2] bg-surface rounded mb-1">
+                  {tmpl.zones.map((z, i) => (
+                    <div
+                      key={i}
+                      className="absolute bg-primary/20 border border-primary/30 rounded-sm"
+                      style={{
+                        left: `${(z.x / 12) * 100}%`,
+                        top: `${(z.y / 8) * 100}%`,
+                        width: `${(z.w / 12) * 100}%`,
+                        height: `${(z.h / 8) * 100}%`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="text-[10px] text-text-muted text-center">{tmpl.name}</p>
+              </button>
+            ))}
+            {activeTemplate && (
+              <button
+                onClick={() => setActiveTemplate(null)}
+                className="border border-border-light rounded-btn p-2 hover:border-red-300 flex items-center justify-center text-xs text-text-muted"
+              >
+                Quitar guia
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main: sidebar + canvas */}
       <div className="flex gap-4">
         {/* Sidebar: queries */}
         <div className="w-64 flex-shrink-0 border-r border-border-light pr-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-          <h3 className="text-sm font-semibold text-text-dark mb-3 flex items-center gap-1.5">
-            <GripVertical size={14} />
-            Consultas Guardadas
+          <h3 className="text-sm font-semibold text-text-dark mb-2 flex items-center gap-1.5">
+            <GripVertical size={14} /> Consultas Guardadas
           </h3>
-          {queries.length === 0 ? (
+          <input
+            className="input text-xs mb-2"
+            placeholder="Buscar consultas..."
+            value={querySearch}
+            onChange={e => setQuerySearch(e.target.value)}
+          />
+          {filteredQueries.length === 0 ? (
             <div className="text-center py-4">
               <p className="text-xs text-text-muted">No hay consultas</p>
               <Link to="/consultas/nueva" className="text-xs text-primary">Crear consulta</Link>
             </div>
           ) : (
-            queries.map(q => {
+            filteredQueries.map(q => {
               const chartType = q.visualizations?.[0]?.type || 'table'
               return (
                 <div key={q.id} className="card p-2.5 mb-2 hover:shadow-card-hover transition-shadow">
@@ -274,13 +388,39 @@ export default function DashboardBuilder() {
         </div>
 
         {/* Canvas */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 relative">
+          {/* Template guide overlay */}
+          {activeTemplate && (
+            <div
+              className="absolute inset-0 z-10 pointer-events-none"
+              onClick={() => setActiveTemplate(null)}
+              style={{ pointerEvents: 'auto' }}
+            >
+              <div className="relative w-full h-full" onClick={() => setActiveTemplate(null)}>
+                {activeTemplate.zones.map((z, i) => (
+                  <div
+                    key={i}
+                    className="absolute border-2 border-dashed border-primary/30 bg-primary/5 rounded-card flex items-center justify-center"
+                    style={{
+                      left: `${(z.x / 12) * 100}%`,
+                      top: `${z.y * 96}px`,
+                      width: `${(z.w / 12) * 100}%`,
+                      height: `${z.h * 96}px`,
+                    }}
+                  >
+                    <span className="text-xs text-primary/40 font-medium">Zona {i + 1}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {widgets.length === 0 ? (
             <div className="border-2 border-dashed border-border rounded-card min-h-[400px] flex items-center justify-center">
               <div className="text-center">
                 <GripVertical size={48} className="text-text-light mx-auto mb-3" />
                 <p className="text-text-muted text-sm">Agrega consultas desde el panel lateral</p>
-                <p className="text-text-light text-xs mt-1">Arrastra y redimensiona los widgets libremente</p>
+                <p className="text-text-light text-xs mt-1">Arrastra y redimensiona libremente</p>
               </div>
             </div>
           ) : (
@@ -292,44 +432,111 @@ export default function DashboardBuilder() {
               isDraggable
               isResizable
               compactType="vertical"
-              margin={[16, 16]}
+              margin={[12, 12]}
               onLayoutChange={handleLayoutChange}
               style={{ minHeight: 400 }}
             >
-              {widgets.map((w, i) => (
+              {widgets.map(w => (
                 <div key={w.grid_i}>
                   <div className="card h-full flex flex-col overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-white border-b border-border-light">
-                      <span className="text-xs font-semibold text-text-dark truncate">{w.title}</span>
-                      <div className="flex gap-0.5">
-                        <button
-                          onClick={() => setSqlModal({ title: w.title, sql: w.sql || '', queryText: w.query_text || '' })}
-                          className="btn-icon p-0.5"
-                          title="Ver SQL"
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-white border-b border-border-light">
+                      {editingTitle === w.grid_i ? (
+                        <input
+                          className="text-xs font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent"
+                          value={w.custom_title || w.title}
+                          onChange={e => updateWidgetField(w.grid_i, 'custom_title', e.target.value)}
+                          onBlur={() => setEditingTitle(null)}
+                          onKeyDown={e => e.key === 'Enter' && setEditingTitle(null)}
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          className="text-xs font-semibold text-text-dark truncate cursor-pointer flex-1"
+                          onDoubleClick={() => setEditingTitle(w.grid_i)}
+                          title="Doble clic para editar titulo"
                         >
-                          <Info size={12} />
+                          {w.custom_title || w.title}
+                        </span>
+                      )}
+                      <div className="flex gap-0.5 flex-shrink-0">
+                        <button onClick={() => setEditingTitle(w.grid_i)} className="btn-icon p-0.5" title="Editar titulo">
+                          <Pencil size={10} />
                         </button>
-                        <button
-                          onClick={() => removeWidget(i)}
-                          className="btn-icon p-0.5 hover:text-red-500"
-                          title="Eliminar"
-                        >
-                          <X size={12} />
+                        {w.sql && (
+                          <button onClick={() => setSqlModal({ title: w.title, sql: w.sql || '', queryText: w.query_text || '' })} className="btn-icon p-0.5" title="Ver SQL">
+                            <Info size={11} />
+                          </button>
+                        )}
+                        <button onClick={() => removeWidget(w.grid_i)} className="btn-icon p-0.5 hover:text-red-500" title="Eliminar">
+                          <X size={11} />
                         </button>
                       </div>
                     </div>
+
+                    {/* Content */}
                     <div className="flex-1 p-2 overflow-hidden">
-                      {w.data?.length && w.columns?.length >= 2 ? (
+                      {/* Title block */}
+                      {w.is_title_block ? (
+                        <div className="flex items-center justify-center h-full">
+                          <input
+                            className="text-lg font-bold text-center w-full bg-transparent border-0 outline-none text-text-dark"
+                            value={w.text_content || ''}
+                            onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
+                            placeholder="Titulo de seccion..."
+                          />
+                        </div>
+                      ) : w.type === 'text_card' ? (
+                        <div className="h-full flex flex-col gap-1 p-1">
+                          <textarea
+                            className="flex-1 text-sm bg-transparent border-0 outline-none resize-none text-text-dark"
+                            value={w.text_content || ''}
+                            onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
+                            placeholder="Texto informativo..."
+                          />
+                          <input
+                            className="text-xs text-primary bg-transparent border-0 border-b border-border-light outline-none"
+                            value={w.text_url || ''}
+                            onChange={e => updateWidgetField(w.grid_i, 'text_url', e.target.value)}
+                            placeholder="URL (opcional)"
+                          />
+                        </div>
+                      ) : w.type === 'kpi' && w.kpi_value !== undefined ? (
+                        <KpiCard
+                          label={w.kpi_label || w.title}
+                          value={w.kpi_value}
+                          color={PRIMARY_COLOR}
+                        />
+                      ) : w.data?.length && w.columns?.length >= 2 ? (
                         <ChartWidget
                           data={w.data}
                           columns={w.columns}
-                          chartType={(w.type || 'bar') as ChartType}
-                          height={Math.max(w.grid_h * 80 - 100, 150)}
+                          chartType={(w.chart_type || w.type || 'bar') as ChartType}
+                          height={Math.max(w.grid_h * 80 - 80, 120)}
                         />
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-xs text-text-muted">
-                          Sin datos
+                      ) : w.data?.length ? (
+                        <div className="text-xs overflow-auto h-full">
+                          <table className="w-full">
+                            <thead>
+                              <tr className="bg-surface">
+                                {w.columns.map(c => (
+                                  <th key={c} className="px-2 py-1 text-left text-[10px] font-semibold text-text-muted">{c}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {w.data.slice(0, 8).map((row, ri) => (
+                                <tr key={ri} className="border-b border-border-light">
+                                  {w.columns.map(c => (
+                                    <td key={c} className="px-2 py-1 text-[10px] truncate max-w-[120px]">{String(row[c] ?? '')}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-xs text-text-muted">Sin datos</div>
                       )}
                     </div>
                   </div>
@@ -340,7 +547,7 @@ export default function DashboardBuilder() {
         </div>
       </div>
 
-      {/* AI FAB */}
+      {/* AI FAB — fixed position */}
       <button
         onClick={() => setAiOpen(!aiOpen)}
         className="fixed bottom-6 right-6 btn-primary rounded-pill py-2.5 px-5 shadow-lg flex items-center gap-2 z-40"
@@ -348,41 +555,44 @@ export default function DashboardBuilder() {
         <Sparkles size={16} /> Asistente IA
       </button>
 
-      {/* AI Slide-over */}
+      {/* AI Slide-over — fixed, doesn't push content */}
       {aiOpen && (
         <div className="fixed top-0 right-0 w-96 h-full bg-white shadow-2xl z-50 flex flex-col border-l border-border-light">
           <div className="flex items-center justify-between p-4 border-b border-border-light">
             <h3 className="font-semibold text-sm">Asistente IA para Tableros</h3>
             <button onClick={() => setAiOpen(false)} className="btn-icon"><X size={16} /></button>
           </div>
-
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             <div className="bg-surface p-3 rounded-card text-xs text-text-muted">
               <Sparkles size={14} className="text-primary inline mr-1" />
-              Describe que metricas quieres ver. Ejecutare las consultas y las agregare como widgets.
+              Describe que metricas quieres. Ejecutare la consulta y la agregare automaticamente al canvas.
+              <br /><br />
+              Ejemplos:<br />
+              - "Agrega un KPI con el total de mensajes"<br />
+              - "Tendencia de mensajes por dia"<br />
+              - "Top 5 agentes por rendimiento"
             </div>
             {aiMessages.map((m, i) => (
               <div key={i} className={`p-2 rounded-btn text-xs ${
                 m.role === 'user' ? 'bg-primary text-white ml-8' :
                 m.role === 'system' && m.content.startsWith('Agregado') ? 'bg-green-50 text-green-700' :
                 m.role === 'system' && m.content.startsWith('Error') ? 'bg-red-50 text-red-700' :
-                'bg-yellow-50 text-yellow-700'
+                'bg-surface text-text-dark'
               }`}>
                 {m.content}
               </div>
             ))}
             {aiLoading && (
               <div className="flex items-center gap-2 text-xs text-text-muted">
-                <Loader2 size={12} className="animate-spin" /> Ejecutando...
+                <Loader2 size={12} className="animate-spin" /> Ejecutando y agregando...
               </div>
             )}
           </div>
-
           <div className="p-4 border-t border-border-light">
             <div className="flex gap-2">
               <input
                 className="input text-sm"
-                placeholder="Ej: Tendencia de mensajes y top contactos"
+                placeholder="Ej: Agrega una tarjeta con total de mensajes"
                 value={aiInput}
                 onChange={e => setAiInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleAiSend()}
@@ -413,9 +623,7 @@ export default function DashboardBuilder() {
               {sqlModal.sql && (
                 <div>
                   <p className="text-xs font-semibold text-text-muted mb-1">SQL generado</p>
-                  <pre className="bg-[#1A1A2E] text-gray-300 p-3 rounded-btn text-xs overflow-x-auto font-mono">
-                    {sqlModal.sql}
-                  </pre>
+                  <pre className="bg-[#1A1A2E] text-gray-300 p-3 rounded-btn text-xs overflow-x-auto font-mono whitespace-pre-wrap">{sqlModal.sql}</pre>
                 </div>
               )}
             </div>

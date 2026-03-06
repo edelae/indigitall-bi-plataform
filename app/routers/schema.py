@@ -15,27 +15,26 @@ async def list_tables():
         return svc.list_all_tables_with_columns()
     except Exception as e:
         logger.warning("SchemaService.list_all_tables_with_columns failed: %s", e)
-        # Fallback: try just list_tables without columns
         try:
             tables = svc.list_tables()
-            return [{"table_name": t["table_name"], "row_count": t["row_count"], "size": t["size"], "columns": []} for t in tables]
+            return [{"table_name": t["table_name"], "row_count": t["row_count"], "size": t["size"], "schema": "public", "columns": []} for t in tables]
         except Exception:
             return []
 
 
 @router.get("/tables/{table_name}")
-async def get_table_detail(table_name: str):
+async def get_table_detail(table_name: str, schema: str = "public"):
     svc = SchemaService()
-    columns = svc.get_table_schema(table_name)
+    columns = svc.get_table_schema(table_name, schema)
     if not columns:
         raise HTTPException(status_code=404, detail="Table not found or not allowed")
-    return {"table_name": table_name, "columns": columns}
+    return {"table_name": table_name, "schema": schema, "columns": columns}
 
 
 @router.get("/tables/{table_name}/preview")
-async def preview_table(table_name: str, limit: int = 50):
+async def preview_table(table_name: str, limit: int = 50, schema: str = "public"):
     svc = SchemaService()
-    df = svc.preview_table(table_name, limit=min(limit, 200))
+    df = svc.preview_table(table_name, limit=min(limit, 200), schema=schema)
     if df.empty:
         return {"columns": [], "data": [], "total": 0}
     return {
