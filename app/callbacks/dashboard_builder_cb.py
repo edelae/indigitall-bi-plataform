@@ -1,4 +1,4 @@
-"""Dashboard builder callbacks — drag-and-drop grid, add/remove widgets, save, edit, AI assistant."""
+"""Dashboard builder callbacks — add/remove/resize widgets, save, edit, AI assistant."""
 
 import json
 import logging
@@ -7,7 +7,6 @@ from dash import (
     Input, Output, State, callback, html, dcc, ctx, no_update, ALL,
 )
 import dash_bootstrap_components as dbc
-import dash_draggable
 from dash.exceptions import PreventUpdate
 import plotly.express as px
 
@@ -77,90 +76,68 @@ def _render_widget_chart(data, chart_type, height=280):
 
 
 def _render_canvas(widgets):
-    """Render the full widget canvas as a draggable grid."""
+    """Render the widget canvas as a Bootstrap Row/Col grid with resize buttons."""
     if not widgets:
         return html.Div([
             html.I(className="bi bi-grid-1x2 display-4 text-muted"),
             html.P("Agrega consultas desde el panel lateral para crear widgets.",
                    className="text-muted mt-3"),
-            html.P("Arrastra y redimensiona los widgets libremente.",
+            html.P("Usa los botones de redimensionar para ajustar el ancho.",
                    className="text-muted", style={"fontSize": "13px"}),
         ], className="text-center py-5", id="builder-empty-state")
 
-    children = []
-    layout_items = []
-
+    cols = []
     for i, w in enumerate(widgets):
-        widget_id = w.get("grid_i", f"widget-{i}")
         chart_type = w.get("type") or w.get("chart_type", "bar")
         title = w.get("title", "Widget")
         data = w.get("data", [])
+        width = w.get("width", 6)
 
-        # Calculate chart height from grid_h
-        grid_h = w.get("grid_h", 4)
-        chart_height = max(grid_h * 80 - 100, 180)
+        SIZE_LABELS = {4: "1/3", 6: "1/2", 12: "Completo"}
+        size_label = SIZE_LABELS.get(width, str(width))
 
-        card = html.Div(
-            dbc.Card([
-                dbc.CardHeader([
-                    html.Span(title, className="fw-semibold small"),
-                    html.Div([
-                        dbc.Button(
-                            html.I(className="bi bi-info-circle"),
-                            id={"type": "builder-widget-info", "index": i},
-                            outline=True, color="secondary", size="sm",
-                            className="me-1",
-                            style={"padding": "1px 5px", "fontSize": "11px"},
-                            title="Ver SQL",
-                        ),
-                        dbc.Button(
-                            html.I(className="bi bi-x-lg"),
-                            id={"type": "builder-widget-remove", "index": i},
-                            outline=True, color="danger", size="sm",
-                            style={"padding": "1px 5px", "fontSize": "11px"},
-                            title="Eliminar",
-                        ),
-                    ], className="d-flex"),
-                ], className="py-2 px-3 bg-white d-flex justify-content-between align-items-center"),
-                dbc.CardBody(
-                    _render_widget_chart(data, chart_type, height=chart_height),
-                    className="p-2",
-                ),
-            ], className="dashboard-widget h-100", style={
-                "borderRadius": "16px", "border": "1px solid #F0F0F5",
-                "boxShadow": "0 2px 12px rgba(0,0,0,0.04)",
-            }),
-            id=widget_id,
-            style={"height": "100%"},
-        )
-
-        children.append(card)
-
-        # Build layout position
-        grid_x = w.get("grid_x", (i % 2) * 6)
-        grid_y = w.get("grid_y", (i // 2) * 4)
-        grid_w = w.get("grid_w", 6)
-
-        layout_items.append({
-            "i": widget_id,
-            "x": grid_x,
-            "y": grid_y,
-            "w": grid_w,
-            "h": grid_h,
+        card = dbc.Card([
+            dbc.CardHeader([
+                html.Span(title, className="fw-semibold small"),
+                html.Div([
+                    dbc.Button(
+                        [html.I(className="bi bi-arrows-angle-expand me-1"),
+                         html.Span(size_label, style={"fontSize": "9px"})],
+                        id={"type": "builder-widget-resize", "index": i},
+                        outline=True, color="secondary", size="sm",
+                        className="me-1",
+                        style={"padding": "1px 5px", "fontSize": "11px"},
+                        title=f"Redimensionar (actual: {size_label})",
+                    ),
+                    dbc.Button(
+                        html.I(className="bi bi-info-circle"),
+                        id={"type": "builder-widget-info", "index": i},
+                        outline=True, color="secondary", size="sm",
+                        className="me-1",
+                        style={"padding": "1px 5px", "fontSize": "11px"},
+                        title="Ver SQL",
+                    ),
+                    dbc.Button(
+                        html.I(className="bi bi-x-lg"),
+                        id={"type": "builder-widget-remove", "index": i},
+                        outline=True, color="danger", size="sm",
+                        style={"padding": "1px 5px", "fontSize": "11px"},
+                        title="Eliminar",
+                    ),
+                ], className="d-flex"),
+            ], className="py-2 px-3 bg-white d-flex justify-content-between align-items-center"),
+            dbc.CardBody(
+                _render_widget_chart(data, chart_type),
+                className="p-2",
+            ),
+        ], className="dashboard-widget h-100", style={
+            "borderRadius": "16px", "border": "1px solid #F0F0F5",
+            "boxShadow": "0 2px 12px rgba(0,0,0,0.04)",
         })
 
-    return dash_draggable.ResponsiveGridLayout(
-        id="builder-grid",
-        children=children,
-        layouts={"lg": layout_items},
-        gridCols={"lg": 12, "md": 10, "sm": 6, "xs": 4},
-        rowHeight=80,
-        isDraggable=True,
-        isResizable=True,
-        compactType="vertical",
-        margin=[16, 16],
-        style={"minHeight": "400px"},
-    )
+        cols.append(dbc.Col(card, md=width, className="mb-3"))
+
+    return dbc.Row(cols, className="g-3")
 
 
 # --- 1. Load available queries for panel ---
@@ -293,44 +270,29 @@ def remove_widget(n_clicks_list, widgets):
     return widgets
 
 
-# --- 4. Sync grid positions back to widgets store ---
+# --- 4. Resize widget (cycle: 4 → 6 → 12 → 4) ---
 
 @callback(
     Output("builder-widgets", "data", allow_duplicate=True),
-    Input("builder-grid", "layouts"),
+    Input({"type": "builder-widget-resize", "index": ALL}, "n_clicks"),
     State("builder-widgets", "data"),
     prevent_initial_call=True,
 )
-def sync_grid_positions(layouts, widgets):
-    """Update widget positions when the user drags or resizes."""
-    if not layouts or not widgets:
+def resize_widget(n_clicks_list, widgets):
+    if not any(n_clicks_list):
         raise PreventUpdate
 
-    lg_layout = layouts.get("lg", [])
-    if not lg_layout:
+    triggered = ctx.triggered_id
+    if not isinstance(triggered, dict):
         raise PreventUpdate
 
-    # Build a map from widget id to position
-    pos_map = {}
-    for item in lg_layout:
-        pos_map[item["i"]] = item
-
-    changed = False
-    for i, w in enumerate(widgets):
-        widget_id = w.get("grid_i", f"widget-{i}")
-        if widget_id in pos_map:
-            pos = pos_map[widget_id]
-            if (w.get("grid_x") != pos["x"] or w.get("grid_y") != pos["y"]
-                    or w.get("grid_w") != pos["w"] or w.get("grid_h") != pos["h"]):
-                w["grid_x"] = pos["x"]
-                w["grid_y"] = pos["y"]
-                w["grid_w"] = pos["w"]
-                w["grid_h"] = pos["h"]
-                w["width"] = pos["w"]  # Keep backward compat
-                changed = True
-
-    if not changed:
-        raise PreventUpdate
+    idx = triggered["index"]
+    widgets = widgets or []
+    if 0 <= idx < len(widgets):
+        current = widgets[idx].get("width", 6)
+        cycle = {4: 6, 6: 12, 12: 4}
+        widgets[idx]["width"] = cycle.get(current, 6)
+        widgets[idx]["grid_w"] = widgets[idx]["width"]
 
     return widgets
 

@@ -3,7 +3,6 @@
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
-import dash_draggable
 
 dash.register_page(__name__, path="/tableros/nuevo", name="Nuevo Tablero", order=38)
 

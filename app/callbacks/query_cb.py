@@ -209,7 +209,9 @@ def _build_source_tab(df, ai_function, query_details, tenant=None):
     try:
         schema_svc = SchemaService()
         tables_with_cols = schema_svc.list_all_tables_with_columns()
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("SchemaService failed in source tab: %s", e)
         tables_with_cols = []
 
     # Build sidebar with collapsible table tree

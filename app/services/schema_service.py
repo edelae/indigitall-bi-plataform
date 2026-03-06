@@ -11,6 +11,7 @@ ALLOWED_TABLES = {
     "messages", "contacts", "agents", "daily_stats",
     "toques_daily", "campaigns", "toques_heatmap", "toques_usuario",
     "saved_queries", "dashboards", "sync_state",
+    "chat_conversations",
 }
 
 

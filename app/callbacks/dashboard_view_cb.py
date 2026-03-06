@@ -5,7 +5,6 @@ from dash import (
     Input, Output, State, callback, html, dcc, ctx, no_update, ALL,
 )
 import dash_bootstrap_components as dbc
-import dash_draggable
 from dash.exceptions import PreventUpdate
 import plotly.express as px
 
@@ -214,36 +213,14 @@ def load_dashboard(pathname, tenant):
     # Ensure all widgets have grid_* fields (backward compat)
     layout_data = _migrate_legacy_layout(layout_data)
 
-    # Build grid children and layout
-    children = []
-    grid_items = []
-
+    # Build widget columns
+    cols = []
     for i, w in enumerate(layout_data):
+        width = w.get("grid_w", w.get("width", 6))
         widget_div = _render_widget(w, i)
-        children.append(widget_div)
+        cols.append(dbc.Col(widget_div, md=width, className="mb-3"))
 
-        widget_id = w.get("grid_i", f"widget-{i}")
-        grid_items.append({
-            "i": widget_id,
-            "x": w.get("grid_x", (i % 2) * 6),
-            "y": w.get("grid_y", (i // 2) * 4),
-            "w": w.get("grid_w", w.get("width", 6)),
-            "h": w.get("grid_h", 4),
-            "static": True,  # View-only: no dragging
-        })
-
-    grid = dash_draggable.ResponsiveGridLayout(
-        id="dashboard-view-grid",
-        children=children,
-        layouts={"lg": grid_items},
-        gridCols={"lg": 12, "md": 10, "sm": 6, "xs": 4},
-        rowHeight=80,
-        isDraggable=False,
-        isResizable=False,
-        compactType="vertical",
-        margin=[16, 16],
-        style={"minHeight": "300px"},
-    )
+    grid = dbc.Row(cols, className="g-3")
 
     return grid, dashboard_name, description
 
