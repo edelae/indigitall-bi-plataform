@@ -26,6 +26,7 @@ const CHART_TYPES: { type: ChartType; icon: typeof BarChart3; label: string }[] 
   { type: 'combo', icon: Activity, label: 'Combinada' },
   { type: 'funnel', icon: Triangle, label: 'Funnel' },
   { type: 'treemap', icon: Grid3X3, label: 'Treemap' },
+  { type: 'heatmap', icon: Grid3X3, label: 'Heatmap' },
   { type: 'gauge', icon: Gauge, label: 'Gauge' },
   { type: 'table', icon: Table2, label: 'Tabla' },
 ]

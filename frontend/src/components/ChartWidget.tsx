@@ -269,6 +269,56 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
     )
   }
 
+  // HEATMAP (rendered as colored grid using ScatterChart)
+  if (chartType === 'heatmap' && columns.length >= 3) {
+    const zKey = columns[2]
+    const xValues = [...new Set(processedData.map(r => String(r[xKey])))]
+    const yValues = [...new Set(processedData.map(r => String(r[yKey])))]
+    const allZ = processedData.map(r => Number(r[zKey]) || 0)
+    const minZ = Math.min(...allZ)
+    const maxZ = Math.max(...allZ)
+    const rangeZ = maxZ - minZ || 1
+
+    const cellW = Math.max(Math.floor((height * 1.5) / xValues.length), 30)
+    const cellH = Math.max(Math.floor(height / (yValues.length + 1)), 24)
+    const totalW = cellW * xValues.length + 80
+
+    const getColor = (val: number) => {
+      const t = (val - minZ) / rangeZ
+      const r = Math.round(66 + (30 - 66) * t)
+      const g = Math.round(133 + (136 - 133) * t)
+      const b = Math.round(244 + (229 - 244) * t)
+      return `rgb(${r},${g},${b})`
+    }
+
+    return (
+      <div style={{ width: '100%', height, overflow: 'auto' }}>
+        <svg width={Math.max(totalW, 300)} height={Math.max(cellH * (yValues.length + 1) + 40, height)}>
+          {/* X axis labels */}
+          {xValues.map((xv, xi) => (
+            <text key={`xl-${xi}`} x={80 + xi * cellW + cellW / 2} y={14} textAnchor="middle" fontSize={10} fill="#6E7191">{xv}</text>
+          ))}
+          {/* Rows */}
+          {yValues.map((yv, yi) => (
+            <g key={`row-${yi}`}>
+              <text x={75} y={24 + yi * cellH + cellH / 2 + 4} textAnchor="end" fontSize={10} fill="#6E7191">{yv}</text>
+              {xValues.map((xv, xi) => {
+                const row = processedData.find(r => String(r[xKey]) === xv && String(r[yKey]) === yv)
+                const val = row ? Number(row[zKey]) || 0 : 0
+                return (
+                  <g key={`cell-${yi}-${xi}`}>
+                    <rect x={80 + xi * cellW} y={20 + yi * cellH} width={cellW - 2} height={cellH - 2} rx={3} fill={getColor(val)} />
+                    <text x={80 + xi * cellW + cellW / 2} y={20 + yi * cellH + cellH / 2 + 4} textAnchor="middle" fontSize={9} fill="#fff">{val}</text>
+                  </g>
+                )
+              })}
+            </g>
+          ))}
+        </svg>
+      </div>
+    )
+  }
+
   // GAUGE (rendered as a semi-circle pie)
   if (chartType === 'gauge') {
     const val = Number(processedData[0]?.[yKey]) || 0
@@ -305,6 +355,24 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   }
 
   // DEFAULT: bar chart (also handles 'histogram')
+  // Multi-Y (bivariate): grouped bars when 3+ columns
+  if (yKeys.length >= 2) {
+    return (
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={processedData} onClick={handleClick}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
+          <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} label={xAxisLabel} />
+          <YAxis {...commonAxisProps} label={yAxisLabel} />
+          <Tooltip {...tooltipStyle} />
+          {yKeys.map((col, i) => (
+            <Bar key={col} dataKey={col} fill={palette[i % palette.length]} radius={[4, 4, 0, 0]} name={getLabel(col)} />
+          ))}
+          <Legend />
+        </BarChart>
+      </ResponsiveContainer>
+    )
+  }
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={processedData} onClick={handleClick}>
