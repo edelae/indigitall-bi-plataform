@@ -51,7 +51,7 @@ export default function DataExplorer() {
 
   // Group tables by schema
   const publicTables = tables.filter(t => !t.schema || t.schema === 'public')
-  const analyticsTables = tables.filter(t => t.schema === 'public_analytics')
+  const analyticsTables = tables.filter(t => t.schema === 'public_marts')
 
   const filteredPublic = search
     ? publicTables.filter(t => t.table_name.toLowerCase().includes(search.toLowerCase()))
@@ -131,7 +131,7 @@ export default function DataExplorer() {
                   analytics ({filteredAnalytics.length})
                 </h2>
                 <div className="space-y-0.5 mb-4">
-                  {renderTableList(filteredAnalytics, 'public_analytics')}
+                  {renderTableList(filteredAnalytics, 'public_marts')}
                 </div>
               </>
             )}

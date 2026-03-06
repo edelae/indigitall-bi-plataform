@@ -14,18 +14,18 @@ ALLOWED_TABLES = {
     "messages", "contacts", "agents", "daily_stats",
     "toques_daily", "campaigns", "toques_heatmap", "toques_usuario",
     "saved_queries", "dashboards", "sync_state",
-    "chat_conversations",
+    "chat_conversations", "chat_channels", "chat_topics",
 }
 
-# Analytics schema tables (always allowed for exploration)
+# Analytics schema tables in public_marts (dbt marts)
 ANALYTICS_TABLES = {
-    "fact_message_events", "dim_date", "dim_time", "dim_channel",
-    "dim_event_type", "dim_tenant", "dim_contact", "dim_agent",
-    "dim_campaign", "dim_conversation",
+    "dim_campaigns", "dim_contacts",
+    "fct_agent_performance", "fct_daily_stats",
+    "fct_messages_daily", "fct_toques_metrics",
 }
 
 # Schemas to explore
-ALLOWED_SCHEMAS = ["public", "public_analytics"]
+ALLOWED_SCHEMAS = ["public", "public_marts"]
 
 
 class SchemaService:
@@ -33,7 +33,7 @@ class SchemaService:
 
     def list_tables(self) -> List[Dict[str, Any]]:
         """List all application tables with row counts."""
-        query = text("""
+        query = text(r"""
             SELECT
                 t.table_name,
                 COALESCE(s.n_live_tup, 0) AS row_count,
@@ -45,8 +45,7 @@ class SchemaService:
                 ON s.relname = t.table_name AND s.schemaname = t.table_schema
             WHERE t.table_schema = 'public'
               AND t.table_type = 'BASE TABLE'
-              AND t.table_name NOT LIKE 'pg_%'
-              AND t.table_name NOT LIKE '_%%'
+              AND t.table_name NOT LIKE 'pg\_%' ESCAPE '\'
             ORDER BY COALESCE(s.n_live_tup, 0) DESC
         """)
         with engine.connect() as conn:
@@ -58,7 +57,7 @@ class SchemaService:
         ]
 
     def list_analytics_tables(self) -> List[Dict[str, Any]]:
-        """List analytics schema tables with row counts."""
+        """List analytics schema tables (public_marts) with row counts."""
         query = text("""
             SELECT
                 t.table_name,
@@ -69,7 +68,7 @@ class SchemaService:
             FROM information_schema.tables t
             LEFT JOIN pg_stat_user_tables s
                 ON s.relname = t.table_name AND s.schemaname = t.table_schema
-            WHERE t.table_schema = 'public_analytics'
+            WHERE t.table_schema = 'public_marts'
               AND t.table_type = 'BASE TABLE'
             ORDER BY COALESCE(s.n_live_tup, 0) DESC
         """)
@@ -77,7 +76,7 @@ class SchemaService:
             with engine.connect() as conn:
                 rows = conn.execute(query).fetchall()
             return [
-                {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public_analytics"}
+                {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public_marts"}
                 for r in rows
             ]
         except Exception as e:
@@ -88,7 +87,7 @@ class SchemaService:
         """Get column definitions for a table."""
         if schema == "public" and table_name not in ALLOWED_TABLES:
             return []
-        if schema == "public_analytics" and table_name not in ANALYTICS_TABLES:
+        if schema == "public_marts" and table_name not in ANALYTICS_TABLES:
             return []
         query = text("""
             SELECT
@@ -118,7 +117,7 @@ class SchemaService:
         """Return the first N rows of a table. Uses whitelist validation."""
         if schema == "public" and table_name not in ALLOWED_TABLES:
             return pd.DataFrame()
-        if schema == "public_analytics" and table_name not in ANALYTICS_TABLES:
+        if schema == "public_marts" and table_name not in ANALYTICS_TABLES:
             return pd.DataFrame()
         limit = min(limit, 200)
         qualified = f'"{schema}"."{table_name}"'
@@ -183,7 +182,7 @@ class SchemaService:
             result.append({**t, "columns": cols})
         # Analytics schema tables
         for t in self.list_analytics_tables():
-            cols = self.get_table_schema(t["table_name"], "public_analytics")
+            cols = self.get_table_schema(t["table_name"], "public_marts")
             result.append({**t, "columns": cols})
         return result
 

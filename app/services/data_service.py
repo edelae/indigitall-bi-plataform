@@ -1000,46 +1000,30 @@ Columnas: canal, dia_semana, hora, enviados, clicks, abiertos, ctr, dia_orden, t
 TABLA: toques_usuario (toques por usuario)
 Columnas: telefono, canal, proyecto_cuenta, total_toques, total_clicks, primer_toque, ultimo_toque, dias_activos, tenant_id
 
-=== STAR SCHEMA ANALITICO (esquema public_analytics — para consultas cross-channel avanzadas) ===
-IMPORTANTE: Estas tablas estan en el esquema public_analytics. Usa el prefijo public_analytics. en tus queries.
-Ejemplo: SELECT * FROM public_analytics.fact_message_events
+=== TABLAS dbt MARTS (esquema public_marts — datos agregados y dimensionales) ===
+IMPORTANTE: Estas tablas estan en el esquema public_marts. Usa el prefijo public_marts. en tus queries.
+Ejemplo: SELECT * FROM public_marts.fct_daily_stats WHERE tenant_id = 'visionamos' LIMIT 100
 
-TABLA: public_analytics.fact_message_events (~384K filas — un evento por accion atomica)
-Columnas: event_id, date_key (FK→dim_date), time_key (FK→dim_time), channel_key (FK→dim_channel), event_type_key (FK→dim_event_type), tenant_key (FK→dim_tenant), contact_key (FK→dim_contact), agent_key (FK→dim_agent), campaign_key (FK→dim_campaign), conversation_key (FK→dim_conversation), event_count, message_count, total_chunks, is_flash, status_detail, tenant_id
-- Fuentes: messages, sms_envios, toques_daily, chat_conversations
-- Un registro por evento atomico (mensaje enviado, entregado, clic, fallback, etc.)
+TABLA: public_marts.fct_daily_stats (estadisticas diarias consolidadas)
+Columnas: tenant_id, date, total_messages, unique_contacts, conversations, active_agents, fallback_count, fallback_rate, avg_wait_seconds, avg_handle_seconds, total_enviados, total_entregados, total_clicks, total_conversiones, avg_ctr
 
-TABLA: public_analytics.dim_date (3,650 filas — calendario)
-Columnas: date_key, full_date, year, quarter, month, month_name, week_of_year, day_of_month, day_of_week, day_name, is_weekend, is_holiday
+TABLA: public_marts.fct_messages_daily (detalle diario de mensajes WhatsApp)
+Columnas: tenant_id, date, total_messages, unique_contacts, conversations, active_agents, inbound_count, bot_count, agent_count, fallback_count, fallback_rate, avg_wait_seconds, avg_handle_seconds
 
-TABLA: public_analytics.dim_time (24 filas — horas del dia)
-Columnas: time_key, hour_of_day, hour_label, period_of_day (Madrugada/Manana/Tarde/Noche)
+TABLA: public_marts.fct_agent_performance (rendimiento por agente)
+Columnas: tenant_id, agent_id, total_messages, conversations_handled, unique_contacts, active_days, first_active, last_active, avg_handle_seconds, median_handle_seconds, avg_wait_seconds, avg_total_duration_seconds, escalated_fallbacks, closed_conversations
 
-TABLA: public_analytics.dim_channel (9 filas — canales de comunicacion)
-Columnas: channel_key, channel_id, channel_name, channel_group, is_digital
-- channel_name: WhatsApp, SMS, Email, Push, InApp, Wallet, WebPush, Facebook, Other
+TABLA: public_marts.fct_toques_metrics (metricas de campanas por canal y mes)
+Columnas: tenant_id, canal, proyecto_cuenta, month, total_enviados, total_entregados, total_clicks, total_chunks, total_usuarios_unicos, total_abiertos, total_rebotes, total_bloqueados, total_spam, total_desuscritos, total_conversiones, ctr, tasa_entrega, open_rate, conversion_rate, active_days
 
-TABLA: public_analytics.dim_event_type (18 filas — tipos de evento)
-Columnas: event_type_key, event_type_id, event_type_name, event_category, is_positive_outcome
-- event_type_name: sent, delivered, opened, clicked, bounced, failed, fallback, bot_message, agent_message, inbound_message, etc.
+TABLA: public_marts.dim_campaigns (dimension campanas)
+Columnas: tenant_id, campana_id, campana_nombre, canal, proyecto_cuenta, tipo_campana, total_enviados, total_entregados, total_clicks, total_chunks, fecha_inicio, fecha_fin, total_abiertos, total_rebotes, total_bloqueados, total_spam, total_desuscritos, total_conversiones, ctr, tasa_entrega, open_rate, conversion_rate, active_days, first_send_date, last_send_date
 
-TABLA: public_analytics.dim_tenant (1 fila — inquilino)
-Columnas: tenant_key, tenant_id, tenant_name, app_id
+TABLA: public_marts.dim_contacts (dimension contactos)
+Columnas: tenant_id, contact_id, contact_name, total_messages, total_conversations, first_contact, last_contact, fallback_messages, active_days
 
-TABLA: public_analytics.dim_contact (~35K filas — contactos unificados)
-Columnas: contact_key, contact_id, contact_name, phone, email, tenant_id, first_seen, last_seen, total_messages, total_conversations, has_conversations
-
-TABLA: public_analytics.dim_agent (173 filas — agentes humanos)
-Columnas: agent_key, agent_id, agent_email, agent_name, tenant_id, total_messages, total_conversations
-
-TABLA: public_analytics.dim_campaign (~50 filas — campanas)
-Columnas: campaign_key, campaign_id, campaign_name, campaign_type, channel, start_date, end_date, tenant_id
-
-TABLA: public_analytics.dim_conversation (~38.5K filas — sesiones de chat)
-Columnas: conversation_key, conversation_id, session_id, contact_id, agent_id, channel, queued_at, assigned_at, closed_at, first_response_time_seconds, avg_response_time_seconds, dead_time_seconds, is_business_hours, is_resolved_by_bot, tenant_id
-
-NOTA STAR SCHEMA: Para queries cross-channel usa JOINs con prefijo public_analytics.
-Ejemplo: SELECT d.channel_name, e.event_type_name, SUM(f.event_count) FROM public_analytics.fact_message_events f JOIN public_analytics.dim_channel d ON f.channel_key = d.channel_key JOIN public_analytics.dim_event_type e ON f.event_type_key = e.event_type_key GROUP BY 1, 2
+NOTA MARTS: Para queries con datos agregados, usa public_marts. Es mas eficiente que consultar tablas raw.
+Ejemplo: SELECT date, total_messages, fallback_rate FROM public_marts.fct_daily_stats WHERE tenant_id = 'visionamos' ORDER BY date DESC LIMIT 30
 
 === METRICAS CLAVE ===
 1. Tasa de Fallback: COUNT(is_fallback=true) / COUNT(*) * 100 — Meta: < 15% (actual ~3%)

@@ -39,16 +39,14 @@ ALLOWED_TABLES = frozenset({
     "messages", "contacts", "agents", "daily_stats",
     "toques_daily", "campaigns", "toques_heatmap", "toques_usuario",
     "chat_conversations", "chat_channels", "chat_topics",
-    # Analytics star schema (public_analytics schema)
-    "fact_message_events", "dim_date", "dim_time", "dim_channel",
-    "dim_event_type", "dim_tenant", "dim_contact", "dim_agent",
-    "dim_campaign", "dim_conversation",
+    # dbt marts (public_marts schema)
+    "dim_campaigns", "dim_contacts",
+    "fct_agent_performance", "fct_daily_stats",
+    "fct_messages_daily", "fct_toques_metrics",
     # Schema-qualified names
-    "public_analytics.fact_message_events", "public_analytics.dim_date",
-    "public_analytics.dim_time", "public_analytics.dim_channel",
-    "public_analytics.dim_event_type", "public_analytics.dim_tenant",
-    "public_analytics.dim_contact", "public_analytics.dim_agent",
-    "public_analytics.dim_campaign", "public_analytics.dim_conversation",
+    "public_marts.dim_campaigns", "public_marts.dim_contacts",
+    "public_marts.fct_agent_performance", "public_marts.fct_daily_stats",
+    "public_marts.fct_messages_daily", "public_marts.fct_toques_metrics",
 })
 
 SQL_BLOCKLIST = re.compile(
@@ -252,8 +250,8 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 === REGLAS PARA SQL ===
 - Solo SELECT (no INSERT, UPDATE, DELETE, DROP, etc.)
 - Tablas core (esquema public): messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap
-- Tablas analytics (esquema public_analytics): public_analytics.fact_message_events, public_analytics.dim_date, public_analytics.dim_time, public_analytics.dim_channel, public_analytics.dim_event_type, public_analytics.dim_contact, public_analytics.dim_agent, public_analytics.dim_campaign, public_analytics.dim_conversation
-- SIEMPRE usar prefijo public_analytics. para tablas del star schema
+- Tablas dbt marts (esquema public_marts): public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
+- SIEMPRE usar prefijo public_marts. para tablas de marts
 - SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}'
 - SIEMPRE incluir LIMIT (maximo 1000)
 - Usa aggregate functions cuando sea posible
@@ -299,7 +297,7 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 
 === REGLAS SQL ===
 - Solo SELECT. Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap
-- Tablas analytics: public_analytics.fact_message_events, public_analytics.dim_date, etc.
+- Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
 - Alias legibles en espanol (AS "Fecha", AS "Total Mensajes")
 """
 
