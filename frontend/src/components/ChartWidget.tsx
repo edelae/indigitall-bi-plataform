@@ -13,6 +13,10 @@ interface Props {
   columns: string[]
   chartType: ChartType
   height?: number
+  colors?: string[]
+  xLabel?: string
+  yLabel?: string
+  showLegend?: boolean
   onClickPoint?: (point: Record<string, any>) => void
 }
 
@@ -29,10 +33,11 @@ function getLabel(col: string): string {
   return LABELS[lower] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-export default function ChartWidget({ data, columns, chartType, height = 300, onClickPoint }: Props) {
+export default function ChartWidget({ data, columns, chartType, height = 300, colors, xLabel, yLabel, showLegend = true, onClickPoint }: Props) {
   const xKey = columns[0]
   const yKey = columns.length > 1 ? columns[1] : columns[0]
   const yKeys = columns.slice(1)
+  const palette = colors || CHART_COLORS
 
   const processedData = useMemo(() => {
     return data.map(row => {
@@ -62,6 +67,9 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
     axisLine: { stroke: '#E4E4E7' },
     tickLine: false,
   }
+
+  const xAxisLabel = xLabel ? { value: xLabel, position: 'insideBottom' as const, offset: -5, style: { fontSize: 11, fill: '#6E7191' } } : undefined
+  const yAxisLabel = yLabel ? { value: yLabel, angle: -90, position: 'insideLeft' as const, style: { fontSize: 11, fill: '#6E7191' } } : undefined
 
   const tooltipStyle = {
     contentStyle: {
@@ -94,7 +102,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
             labelLine={{ stroke: '#A0A3BD' }}
           >
             {processedData.map((_, i) => (
-              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+              <Cell key={i} fill={palette[i % palette.length]} />
             ))}
           </Pie>
           <Tooltip {...tooltipStyle} />
@@ -114,7 +122,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           <YAxis {...commonAxisProps} />
           <Tooltip {...tooltipStyle} />
           {yKeys.map((col, i) => (
-            <Line key={col} type="monotone" dataKey={col} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2.5} dot={{ fill: CHART_COLORS[i % CHART_COLORS.length], r: 3 }} activeDot={{ r: 5 }} name={getLabel(col)} />
+            <Line key={col} type="monotone" dataKey={col} stroke={palette[i % palette.length]} strokeWidth={2.5} dot={{ fill: palette[i % palette.length], r: 3 }} activeDot={{ r: 5 }} name={getLabel(col)} />
           ))}
           {yKeys.length > 1 && <Legend />}
         </LineChart>
@@ -131,7 +139,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           <XAxis dataKey={xKey} {...commonAxisProps} />
           <YAxis {...commonAxisProps} />
           <Tooltip {...tooltipStyle} />
-          <Area type="monotone" dataKey={yKey} stroke={CHART_COLORS[0]} fill={`${CHART_COLORS[0]}1A`} strokeWidth={2} name={getLabel(yKey)} />
+          <Area type="monotone" dataKey={yKey} stroke={palette[0]} fill={`${palette[0]}1A`} strokeWidth={2} name={getLabel(yKey)} />
         </AreaChart>
       </ResponsiveContainer>
     )
@@ -147,7 +155,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           <YAxis {...commonAxisProps} />
           <Tooltip {...tooltipStyle} />
           {yKeys.map((col, i) => (
-            <Area key={col} type="monotone" dataKey={col} stackId="1" stroke={CHART_COLORS[i % CHART_COLORS.length]} fill={CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.6} name={getLabel(col)} />
+            <Area key={col} type="monotone" dataKey={col} stackId="1" stroke={palette[i % palette.length]} fill={palette[i % palette.length]} fillOpacity={0.6} name={getLabel(col)} />
           ))}
           <Legend />
         </AreaChart>
@@ -164,7 +172,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           <XAxis type="number" {...commonAxisProps} />
           <YAxis dataKey={xKey} type="category" {...commonAxisProps} width={120} />
           <Tooltip {...tooltipStyle} />
-          <Bar dataKey={yKey} fill={CHART_COLORS[0]} radius={[0, 4, 4, 0]} name={getLabel(yKey)} />
+          <Bar dataKey={yKey} fill={palette[0]} radius={[0, 4, 4, 0]} name={getLabel(yKey)} />
         </BarChart>
       </ResponsiveContainer>
     )
@@ -180,7 +188,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           <YAxis {...commonAxisProps} />
           <Tooltip {...tooltipStyle} />
           {yKeys.map((col, i) => (
-            <Bar key={col} dataKey={col} stackId="stack" fill={CHART_COLORS[i % CHART_COLORS.length]} name={getLabel(col)} />
+            <Bar key={col} dataKey={col} stackId="stack" fill={palette[i % palette.length]} name={getLabel(col)} />
           ))}
           <Legend />
         </BarChart>
@@ -197,7 +205,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           <XAxis dataKey={xKey} {...commonAxisProps} name={getLabel(xKey)} />
           <YAxis dataKey={yKey} {...commonAxisProps} name={getLabel(yKey)} />
           <Tooltip {...tooltipStyle} />
-          <Scatter data={processedData} fill={CHART_COLORS[0]} />
+          <Scatter data={processedData} fill={palette[0]} />
         </ScatterChart>
       </ResponsiveContainer>
     )
@@ -212,8 +220,8 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} />
           <YAxis {...commonAxisProps} />
           <Tooltip {...tooltipStyle} />
-          <Bar dataKey={yKeys[0]} fill={CHART_COLORS[0]} radius={[4, 4, 0, 0]} name={getLabel(yKeys[0])} />
-          <Line type="monotone" dataKey={yKeys[1]} stroke={CHART_COLORS[1]} strokeWidth={2.5} dot={{ fill: CHART_COLORS[1], r: 3 }} name={getLabel(yKeys[1])} />
+          <Bar dataKey={yKeys[0]} fill={palette[0]} radius={[4, 4, 0, 0]} name={getLabel(yKeys[0])} />
+          <Line type="monotone" dataKey={yKeys[1]} stroke={palette[1]} strokeWidth={2.5} dot={{ fill: palette[1], r: 3 }} name={getLabel(yKeys[1])} />
           <Legend />
         </ComposedChart>
       </ResponsiveContainer>
@@ -225,7 +233,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
     const funnelData = processedData.map((row, i) => ({
       name: String(row[xKey]),
       value: Number(row[yKey]) || 0,
-      fill: CHART_COLORS[i % CHART_COLORS.length],
+      fill: palette[i % palette.length],
     }))
     return (
       <ResponsiveContainer width="100%" height={height}>
@@ -244,7 +252,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
     const treemapData = processedData.map((row, i) => ({
       name: String(row[xKey]),
       size: Number(row[yKey]) || 0,
-      fill: CHART_COLORS[i % CHART_COLORS.length],
+      fill: palette[i % palette.length],
     }))
     return (
       <ResponsiveContainer width="100%" height={height}>
@@ -253,7 +261,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
           dataKey="size"
           nameKey="name"
           stroke="#fff"
-          fill={CHART_COLORS[0]}
+          fill={palette[0]}
         >
           <Tooltip {...tooltipStyle} />
         </Treemap>
@@ -283,13 +291,13 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
               outerRadius={height / 3}
               innerRadius={height / 4}
             >
-              <Cell fill={CHART_COLORS[0]} />
+              <Cell fill={palette[0]} />
               <Cell fill="#E4E4E7" />
             </Pie>
           </PieChart>
         </ResponsiveContainer>
         <div className="text-center -mt-4">
-          <span className="text-2xl font-bold" style={{ color: CHART_COLORS[0] }}>{val.toLocaleString('es-CO')}</span>
+          <span className="text-2xl font-bold" style={{ color: palette[0] }}>{val.toLocaleString('es-CO')}</span>
           <p className="text-xs text-text-muted mt-1">{getLabel(yKey)}</p>
         </div>
       </div>
@@ -301,12 +309,12 @@ export default function ChartWidget({ data, columns, chartType, height = 300, on
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={processedData} onClick={handleClick}>
         <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
-        <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} />
-        <YAxis {...commonAxisProps} />
+        <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} label={xAxisLabel} />
+        <YAxis {...commonAxisProps} label={yAxisLabel} />
         <Tooltip {...tooltipStyle} />
-        <Bar dataKey={yKey} fill={CHART_COLORS[0]} radius={[4, 4, 0, 0]} name={getLabel(yKey)}>
+        <Bar dataKey={yKey} fill={palette[0]} radius={[4, 4, 0, 0]} name={getLabel(yKey)}>
           {processedData.map((_, i) => (
-            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+            <Cell key={i} fill={palette[i % palette.length]} />
           ))}
         </Bar>
       </BarChart>

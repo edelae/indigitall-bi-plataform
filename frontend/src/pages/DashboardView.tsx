@@ -5,7 +5,7 @@ import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import type { Dashboard, DashboardWidget, ChartType } from '../types'
-import { PRIMARY_COLOR } from '../types'
+import { PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 import { getDashboard } from '../api/client'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -144,7 +144,11 @@ export default function DashboardView() {
                           data={w.data}
                           columns={w.columns}
                           chartType={(w.chart_type || w.type || 'bar') as ChartType}
-                          height={Math.max(w.grid_h * 80 - 80, 120)}
+                          height={Math.max(w.grid_h * 80 - 60, 140)}
+                          colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
+                          xLabel={w.custom_x_label}
+                          yLabel={w.custom_y_label}
+                          showLegend={w.show_legend !== false}
                         />
                       ) : w.data?.length ? (
                         <div className="text-xs overflow-auto h-full">

@@ -74,6 +74,12 @@ export interface DashboardWidget {
   is_title_block?: boolean
   // Editable title
   custom_title?: string
+  // Per-widget color palette
+  color_palette?: string
+  // Per-widget axis labels
+  custom_x_label?: string
+  custom_y_label?: string
+  show_legend?: boolean
 }
 
 export interface TableInfo {
@@ -120,6 +126,16 @@ export const CHART_COLORS = [
 
 export const PRIMARY_COLOR = '#0066CC'
 export const SECONDARY_COLOR = '#00A86B'
+
+// Named color palettes for per-widget customization
+export const COLOR_PALETTES: Record<string, { name: string; colors: string[] }> = {
+  indigitall: { name: 'InDigitall', colors: CHART_COLORS },
+  warm: { name: 'Calido', colors: ['#FF6B35', '#F7C948', '#FF4757', '#FF9F43', '#EE5A24', '#D35400', '#F39C12', '#E74C3C', '#FDCB6E', '#F8B739'] },
+  cool: { name: 'Frio', colors: ['#4A90D9', '#5352ED', '#70A1FF', '#1E90FF', '#6C5CE7', '#A29BFE', '#48DBFB', '#0ABDE3', '#74B9FF', '#55E6C1'] },
+  nature: { name: 'Natural', colors: ['#2ECC71', '#27AE60', '#1ABC9C', '#16A085', '#3D9970', '#2ECC40', '#01A66F', '#00B894', '#55E6C1', '#7BED9F'] },
+  corporate: { name: 'Corporativo', colors: ['#2C3E50', '#34495E', '#7F8C8D', '#95A5A6', '#BDC3C7', '#1E88E5', '#546E7A', '#455A64', '#78909C', '#90A4AE'] },
+  vibrant: { name: 'Vibrante', colors: ['#E91E63', '#9C27B0', '#3F51B5', '#00BCD4', '#4CAF50', '#FF9800', '#F44336', '#673AB7', '#009688', '#FFC107'] },
+}
 
 export interface GridTemplate {
   id: string

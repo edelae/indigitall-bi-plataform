@@ -3,13 +3,13 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
   Save, ArrowLeft, Plus, X, Info, Loader2,
   Sparkles, Send, GripVertical, LayoutTemplate,
-  Type, Link as LinkIcon, Pencil,
+  Type, Link as LinkIcon, Pencil, Palette,
 } from 'lucide-react'
 import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import type { DashboardWidget, SavedQuery, ChartType, GridTemplate } from '../types'
-import { GRID_TEMPLATES, PRIMARY_COLOR } from '../types'
+import { GRID_TEMPLATES, PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 import {
   listQueries, getQuery, getDashboard,
   saveDashboard, updateDashboard, sendChat,
@@ -46,6 +46,8 @@ export default function DashboardBuilder() {
 
   // Edit widget title
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
+  // Color palette picker
+  const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null)
 
   // Load available queries
   useEffect(() => {
@@ -93,7 +95,7 @@ export default function DashboardBuilder() {
         query_text: q.query_text || '',
         grid_i: `widget-${Date.now()}-${idx}`,
         grid_x: (idx % 2) * 6,
-        grid_y: 999,
+        grid_y: 0,
         grid_w: 6,
         grid_h: 4,
       }
@@ -203,7 +205,7 @@ export default function DashboardBuilder() {
           query_text: question,
           grid_i: `ai-${Date.now()}-${idx}`,
           grid_x: 0,
-          grid_y: 999,
+          grid_y: 0,
           grid_w: isKpi ? 3 : 6,
           grid_h: isKpi ? 2 : 4,
           kpi_value: isKpi && result.data[0] ? result.data[0][result.columns[1]] || result.data[0][result.columns[0]] : undefined,
@@ -389,29 +391,25 @@ export default function DashboardBuilder() {
 
         {/* Canvas */}
         <div className="flex-1 min-w-0 relative">
-          {/* Template guide overlay */}
+          {/* Template guide overlay — visual reference only, non-interactive */}
           {activeTemplate && (
-            <div
-              className="absolute inset-0 z-10 pointer-events-none"
-              onClick={() => setActiveTemplate(null)}
-              style={{ pointerEvents: 'auto' }}
-            >
-              <div className="relative w-full h-full" onClick={() => setActiveTemplate(null)}>
-                {activeTemplate.zones.map((z, i) => (
-                  <div
-                    key={i}
-                    className="absolute border-2 border-dashed border-primary/30 bg-primary/5 rounded-card flex items-center justify-center"
-                    style={{
-                      left: `${(z.x / 12) * 100}%`,
-                      top: `${z.y * 96}px`,
-                      width: `${(z.w / 12) * 100}%`,
-                      height: `${z.h * 96}px`,
-                    }}
-                  >
-                    <span className="text-xs text-primary/40 font-medium">Zona {i + 1}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="absolute inset-0 z-0 pointer-events-none">
+              {activeTemplate.zones.map((z, i) => (
+                <div
+                  key={i}
+                  className="absolute border-2 border-dashed border-primary/20 bg-primary/5 rounded-card flex items-center justify-center"
+                  style={{
+                    left: `${(z.x / 12) * 100}%`,
+                    top: `${z.y * 92}px`,
+                    width: `${(z.w / 12) * 100}%`,
+                    height: `${z.h * 92}px`,
+                  }}
+                >
+                  <span className="text-[10px] text-primary/30 font-medium">
+                    {z.w}x{z.h}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
 
@@ -459,10 +457,15 @@ export default function DashboardBuilder() {
                           {w.custom_title || w.title}
                         </span>
                       )}
-                      <div className="flex gap-0.5 flex-shrink-0">
+                      <div className="flex gap-0.5 flex-shrink-0 relative">
                         <button onClick={() => setEditingTitle(w.grid_i)} className="btn-icon p-0.5" title="Editar titulo">
                           <Pencil size={10} />
                         </button>
+                        {w.data?.length > 0 && !w.is_title_block && w.type !== 'text_card' && (
+                          <button onClick={() => setColorPickerOpen(colorPickerOpen === w.grid_i ? null : w.grid_i)} className="btn-icon p-0.5" title="Paleta de colores">
+                            <Palette size={10} />
+                          </button>
+                        )}
                         {w.sql && (
                           <button onClick={() => setSqlModal({ title: w.title, sql: w.sql || '', queryText: w.query_text || '' })} className="btn-icon p-0.5" title="Ver SQL">
                             <Info size={11} />
@@ -471,6 +474,41 @@ export default function DashboardBuilder() {
                         <button onClick={() => removeWidget(w.grid_i)} className="btn-icon p-0.5 hover:text-red-500" title="Eliminar">
                           <X size={11} />
                         </button>
+                        {/* Widget settings dropdown */}
+                        {colorPickerOpen === w.grid_i && (
+                          <div className="absolute top-6 right-0 bg-white border border-border-light rounded-btn shadow-lg z-30 p-2 min-w-[180px]" onClick={e => e.stopPropagation()}>
+                            <p className="text-[9px] text-text-light uppercase tracking-wider px-1 mb-1">Paleta</p>
+                            {Object.entries(COLOR_PALETTES).map(([key, pal]) => (
+                              <button
+                                key={key}
+                                onClick={() => updateWidgetField(w.grid_i, 'color_palette', key)}
+                                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-surface transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}
+                              >
+                                <div className="flex gap-0.5">
+                                  {pal.colors.slice(0, 4).map((c, i) => (
+                                    <div key={i} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c }} />
+                                  ))}
+                                </div>
+                                <span>{pal.name}</span>
+                              </button>
+                            ))}
+                            <div className="border-t border-border-light mt-1.5 pt-1.5">
+                              <p className="text-[9px] text-text-light uppercase tracking-wider px-1 mb-1">Ejes</p>
+                              <input
+                                className="w-full text-[11px] px-2 py-1 border border-border-light rounded mb-1 outline-none focus:border-primary"
+                                placeholder="Etiqueta eje X"
+                                value={w.custom_x_label || ''}
+                                onChange={e => updateWidgetField(w.grid_i, 'custom_x_label', e.target.value)}
+                              />
+                              <input
+                                className="w-full text-[11px] px-2 py-1 border border-border-light rounded outline-none focus:border-primary"
+                                placeholder="Etiqueta eje Y"
+                                value={w.custom_y_label || ''}
+                                onChange={e => updateWidgetField(w.grid_i, 'custom_y_label', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -512,7 +550,11 @@ export default function DashboardBuilder() {
                           data={w.data}
                           columns={w.columns}
                           chartType={(w.chart_type || w.type || 'bar') as ChartType}
-                          height={Math.max(w.grid_h * 80 - 80, 120)}
+                          height={Math.max(w.grid_h * 80 - 60, 140)}
+                          colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
+                          xLabel={w.custom_x_label}
+                          yLabel={w.custom_y_label}
+                          showLegend={w.show_legend !== false}
                         />
                       ) : w.data?.length ? (
                         <div className="text-xs overflow-auto h-full">
