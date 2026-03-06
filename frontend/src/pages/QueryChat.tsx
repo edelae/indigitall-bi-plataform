@@ -66,17 +66,35 @@ export default function QueryChat() {
     const question = searchParams.get('q')
     if (rerunId) {
       getQuery(parseInt(rerunId)).then(query => {
+        const cols = (query.result_columns || []).map(c => c.name)
+        const chartType = (query.visualizations?.[0]?.type) || null
+        const restoredResult: QueryResult | null = query.result_data?.length ? {
+          response: '',
+          data: query.result_data,
+          columns: cols,
+          chart_type: chartType,
+          query_details: query.generated_sql ? { sql: query.generated_sql, title: query.name } : null,
+        } : null
+
+        if (restoredResult) {
+          setLastResult(restoredResult)
+          if (chartType && chartType !== 'table') {
+            setSelectedChart(chartType as ChartType)
+          }
+          setActiveTab('chart')
+        }
+
         if (query.conversation_history?.length) {
           setMessages(query.conversation_history.map(m => ({
             ...m,
-            result: m.role === 'assistant' && query.result_data?.length ? {
-              response: m.content,
-              data: query.result_data,
-              columns: (query.result_columns || []).map(c => c.name),
-              chart_type: (query.visualizations?.[0]?.type) || null,
-              query_details: query.generated_sql ? { sql: query.generated_sql } : null,
-            } : undefined,
+            result: m.role === 'assistant' && restoredResult ? restoredResult : undefined,
           })))
+        } else if (restoredResult && query.query_text) {
+          // No conversation history but we have saved data — show it directly
+          setMessages([
+            { role: 'user', content: query.query_text },
+            { role: 'assistant', content: restoredResult.response || `Resultado: ${query.name}`, result: restoredResult },
+          ])
         } else if (query.query_text) {
           handleSend(query.query_text)
         }
