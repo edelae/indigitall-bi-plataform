@@ -5,7 +5,6 @@ import {
   Save, ArrowLeft, Plus, X, Info, Loader2,
   Sparkles, Send, GripVertical, LayoutTemplate,
   Type, Link as LinkIcon, Pencil, Palette,
-  FilePlus, Trash2, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
@@ -22,12 +21,8 @@ import 'react-resizable/css/styles.css'
 const ResponsiveGridLayout = WidthProvider(Responsive)
 
 const TEXT_SIZE_CLASS: Record<string, string> = {
-  xs: 'text-xs',
-  sm: 'text-sm',
-  base: 'text-base',
-  lg: 'text-lg',
-  xl: 'text-xl',
-  '2xl': 'text-2xl',
+  xs: 'text-xs', sm: 'text-sm', base: 'text-base',
+  lg: 'text-lg', xl: 'text-xl', '2xl': 'text-2xl',
 }
 
 const TEXT_SIZE_OPTIONS = [
@@ -37,6 +32,12 @@ const TEXT_SIZE_OPTIONS = [
   { value: 'lg', label: 'Grande' },
   { value: 'xl', label: 'Muy grande' },
   { value: '2xl', label: 'Extra grande' },
+]
+
+const KPI_STYLE_OPTIONS = [
+  { value: 'minimal', label: 'Minimalista' },
+  { value: 'accent', label: 'Con icono' },
+  { value: 'progress', label: 'Con barra' },
 ]
 
 // ─── Tab / Section Types ───────────────────────────────────────────
@@ -82,14 +83,17 @@ export default function DashboardBuilder() {
   // SQL Modal
   const [sqlModal, setSqlModal] = useState<{ title: string; sql: string; queryText: string } | null>(null)
 
-  // Edit widget title
+  // Edit widget title — PROMPT 2
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
   // Widget settings dropdown
   const [settingsOpen, setSettingsOpen] = useState<string | null>(null)
   // Tab rename
   const [editingTab, setEditingTab] = useState<string | null>(null)
 
-  // Canvas ref for responsive templates
+  // Drag from sidebar — PROMPT 4
+  const [dragOverCanvas, setDragOverCanvas] = useState(false)
+
+  // Canvas ref
   const canvasRef = useRef<HTMLDivElement>(null)
 
   // ─── Helpers ──────────────────────────────────────────────
@@ -117,10 +121,8 @@ export default function DashboardBuilder() {
         setName(d.name)
         setDescription(d.description || '')
         setDashboardId(d.id)
-        // Reconstruct tabs from layout
         const layout = d.layout || []
         if (layout.length > 0 && layout[0]?.tab_id) {
-          // Multi-tab layout
           const tabMap = new Map<string, DashboardTab>()
           for (const w of layout) {
             const tid = w.tab_id || 'tab-1'
@@ -139,7 +141,6 @@ export default function DashboardBuilder() {
           setTabs(loadedTabs)
           setActiveTabId(loadedTabs[0].id)
         } else {
-          // Single-tab legacy layout
           const loaded = layout.map((w: DashboardWidget, i: number) => ({
             ...w,
             grid_i: w.grid_i || `widget-${i}`,
@@ -162,12 +163,13 @@ export default function DashboardBuilder() {
     try {
       const q = await getQuery(queryId)
       const chartType = q.visualizations?.[0]?.type || 'bar'
+      const isKpi = chartType === 'kpi'
       const newWidget: DashboardWidget = {
         query_id: q.id,
         title: q.name.slice(0, 60),
         type: chartType,
         chart_type: chartType,
-        width: 6,
+        width: isKpi ? 3 : 6,
         data: q.result_data || [],
         columns: (q.result_columns || []).map(c => c.name),
         sql: q.generated_sql || '',
@@ -175,8 +177,12 @@ export default function DashboardBuilder() {
         grid_i: `widget-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         grid_x: 0,
         grid_y: 0,
-        grid_w: 6,
-        grid_h: 4,
+        grid_w: isKpi ? 3 : 6,
+        grid_h: isKpi ? 2 : 4,
+        ...(isKpi && q.result_data?.[0] ? {
+          kpi_value: q.result_data[0][(q.result_columns || [])[1]?.name] || q.result_data[0][(q.result_columns || [])[0]?.name],
+          kpi_label: q.name.slice(0, 40),
+        } : {}),
       }
       setWidgets(prev => [...prev, newWidget])
     } catch { /* ignore */ }
@@ -241,6 +247,16 @@ export default function DashboardBuilder() {
       return updated
     })
   }, [setWidgets])
+
+  // PROMPT 2 — start editing title
+  const startEditTitle = useCallback((gridI: string) => {
+    setEditingTitle(gridI)
+    // Use requestAnimationFrame to ensure the input is rendered before focusing
+    requestAnimationFrame(() => {
+      const input = document.querySelector(`[data-title-edit="${gridI}"]`) as HTMLInputElement
+      if (input) { input.focus(); input.select() }
+    })
+  }, [])
 
   // ─── Tab actions ──────────────────────────────────────────
   const addTab = () => {
@@ -331,6 +347,31 @@ export default function DashboardBuilder() {
     setAiInput('')
     setAiMessages(prev => [...prev, { role: 'user', content: msg }])
     executeAiQuestion(msg)
+  }
+
+  // ─── PROMPT 4: Drag from sidebar ─────────────────────────
+  const handleDragStart = (e: React.DragEvent, queryId: number) => {
+    e.dataTransfer.setData('text/plain', String(queryId))
+    e.dataTransfer.effectAllowed = 'copy'
+  }
+
+  const handleCanvasDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDragOverCanvas(true)
+  }
+
+  const handleCanvasDragLeave = () => {
+    setDragOverCanvas(false)
+  }
+
+  const handleCanvasDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOverCanvas(false)
+    const queryId = e.dataTransfer.getData('text/plain')
+    if (queryId) {
+      await addQueryWidget(parseInt(queryId))
+    }
   }
 
   // ─── Grid layout ──────────────────────────────────────────
@@ -467,7 +508,7 @@ export default function DashboardBuilder() {
 
       {/* ─── Main: sidebar + canvas ─── */}
       <div className="flex gap-0">
-        {/* Sidebar: queries */}
+        {/* Sidebar: queries — PROMPT 4: draggable items */}
         <div className="w-56 flex-shrink-0 border-r border-[#E5E7EB] bg-white p-3 max-h-[calc(100vh-220px)] overflow-y-auto">
           <h3 className="text-[11px] font-semibold text-[#374151] mb-2 uppercase tracking-wider flex items-center gap-1">
             <GripVertical size={12} /> Consultas
@@ -487,7 +528,12 @@ export default function DashboardBuilder() {
             filteredQueries.map(q => {
               const chartType = q.visualizations?.[0]?.type || 'table'
               return (
-                <div key={q.id} className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg p-2 mb-1.5 hover:border-primary/30 transition-colors">
+                <div
+                  key={q.id}
+                  draggable
+                  onDragStart={e => handleDragStart(e, q.id)}
+                  className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg p-2 mb-1.5 hover:border-primary/30 transition-colors cursor-grab active:cursor-grabbing"
+                >
                   <p className="text-[11px] font-medium text-[#374151] truncate">{q.name}</p>
                   <div className="flex items-center gap-1 mt-0.5">
                     <span className="text-[9px] px-1.5 py-0.5 bg-primary/10 text-primary rounded font-medium">{chartType.toUpperCase()}</span>
@@ -505,11 +551,20 @@ export default function DashboardBuilder() {
           )}
         </div>
 
-        {/* Canvas */}
-        <div ref={canvasRef} className="flex-1 min-w-0 relative bg-[#F3F4F6] min-h-[500px]" style={{ padding: 12 }}>
+        {/* Canvas — PROMPT 1 FIX: containerPadding matches view mode */}
+        <div
+          ref={canvasRef}
+          className={`flex-1 min-w-0 relative bg-[#F3F4F6] min-h-[500px] transition-colors ${
+            dragOverCanvas ? 'bg-primary/5 ring-2 ring-primary/30 ring-inset' : ''
+          }`}
+          style={{ padding: 0 }}
+          onDragOver={handleCanvasDragOver}
+          onDragLeave={handleCanvasDragLeave}
+          onDrop={handleCanvasDrop}
+        >
           {/* Template guide overlay */}
           {activeTemplate && (
-            <div className="absolute inset-3 z-0 pointer-events-none">
+            <div className="absolute inset-2 z-0 pointer-events-none">
               {activeTemplate.zones.map((z, i) => (
                 <div
                   key={i}
@@ -527,15 +582,25 @@ export default function DashboardBuilder() {
             </div>
           )}
 
-          {widgets.length === 0 ? (
-            <div className="border-2 border-dashed border-[#D1D5DB] rounded-xl min-h-[400px] flex items-center justify-center bg-white/50">
+          {/* Drop hint */}
+          {dragOverCanvas && widgets.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+              <div className="bg-primary/10 border-2 border-dashed border-primary rounded-xl px-8 py-6 text-center">
+                <Plus size={32} className="text-primary mx-auto mb-2" />
+                <p className="text-primary font-medium text-sm">Suelta aqui para agregar</p>
+              </div>
+            </div>
+          )}
+
+          {widgets.length === 0 && !dragOverCanvas ? (
+            <div className="border-2 border-dashed border-[#D1D5DB] rounded-xl min-h-[400px] flex items-center justify-center bg-white/50 m-2">
               <div className="text-center">
                 <GripVertical size={40} className="text-[#D1D5DB] mx-auto mb-2" />
                 <p className="text-[#6B7280] text-sm">Agrega consultas desde el panel lateral</p>
-                <p className="text-[#9CA3AF] text-xs mt-1">Arrastra y redimensiona libremente</p>
+                <p className="text-[#9CA3AF] text-xs mt-1">Arrastra desde el panel o usa el boton Agregar</p>
               </div>
             </div>
-          ) : (
+          ) : widgets.length > 0 && (
             <ResponsiveGridLayout
               layouts={{ lg: gridLayout }}
               breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480 }}
@@ -545,6 +610,7 @@ export default function DashboardBuilder() {
               isResizable
               compactType="vertical"
               margin={[8, 8]}
+              containerPadding={[8, 8]}
               onLayoutChange={handleLayoutChange}
               draggableCancel=".no-drag"
               style={{ minHeight: 400 }}
@@ -557,32 +623,36 @@ export default function DashboardBuilder() {
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#F3F4F6] flex-shrink-0">
                       {editingTitle === w.grid_i ? (
                         <input
+                          data-title-edit={w.grid_i}
                           className="no-drag text-[13px] font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent text-[#1F2937]"
                           value={w.custom_title || w.title}
                           onChange={e => updateWidgetField(w.grid_i, 'custom_title', e.target.value)}
                           onBlur={() => setEditingTitle(null)}
-                          onKeyDown={e => e.key === 'Enter' && setEditingTitle(null)}
+                          onKeyDown={e => { if (e.key === 'Enter') setEditingTitle(null) }}
                           autoFocus
                         />
                       ) : (
                         <span
-                          className="text-[13px] font-semibold text-[#1F2937] truncate flex-1"
-                          onDoubleClick={() => setEditingTitle(w.grid_i)}
-                          title="Doble clic para editar"
+                          className="text-[13px] font-semibold text-[#1F2937] truncate flex-1 cursor-text"
+                          onClick={() => startEditTitle(w.grid_i)}
+                          title="Clic para editar titulo"
                         >
                           {w.custom_title || w.title}
                         </span>
                       )}
                       <div className="no-drag flex gap-0.5 flex-shrink-0 relative">
+                        {/* PROMPT 2: Pencil button with both onMouseDown and onClick */}
                         <button
-                          onMouseDown={e => { e.stopPropagation(); setEditingTitle(w.grid_i) }}
+                          onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+                          onClick={e => { e.stopPropagation(); startEditTitle(w.grid_i) }}
                           className="p-1 rounded hover:bg-gray-100 transition-colors" title="Editar titulo"
                         >
                           <Pencil size={10} className="text-[#9CA3AF]" />
                         </button>
-                        {(w.data?.length > 0 || w.is_title_block || w.type === 'text_card') && (
+                        {(w.data?.length > 0 || w.is_title_block || w.type === 'text_card' || w.type === 'kpi') && (
                           <button
-                            onMouseDown={e => { e.stopPropagation(); setSettingsOpen(settingsOpen === w.grid_i ? null : w.grid_i) }}
+                            onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+                            onClick={e => { e.stopPropagation(); setSettingsOpen(settingsOpen === w.grid_i ? null : w.grid_i) }}
                             className="p-1 rounded hover:bg-gray-100 transition-colors" title="Configuracion"
                           >
                             <Palette size={10} className="text-[#9CA3AF]" />
@@ -590,14 +660,16 @@ export default function DashboardBuilder() {
                         )}
                         {w.sql && (
                           <button
-                            onMouseDown={e => { e.stopPropagation(); setSqlModal({ title: w.title, sql: w.sql || '', queryText: w.query_text || '' }) }}
+                            onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+                            onClick={e => { e.stopPropagation(); setSqlModal({ title: w.title, sql: w.sql || '', queryText: w.query_text || '' }) }}
                             className="p-1 rounded hover:bg-gray-100 transition-colors" title="Ver SQL"
                           >
                             <Info size={10} className="text-[#9CA3AF]" />
                           </button>
                         )}
                         <button
-                          onMouseDown={e => { e.stopPropagation(); removeWidget(w.grid_i) }}
+                          onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+                          onClick={e => { e.stopPropagation(); removeWidget(w.grid_i) }}
                           className="p-1 rounded hover:bg-red-50 transition-colors" title="Eliminar"
                         >
                           <X size={10} className="text-[#9CA3AF] hover:text-red-500" />
@@ -605,8 +677,9 @@ export default function DashboardBuilder() {
                         {/* Settings dropdown */}
                         {settingsOpen === w.grid_i && (
                           <div className="no-drag absolute top-7 right-0 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-30 p-2 min-w-[180px]"
-                            onMouseDown={e => e.stopPropagation()}>
-                            {/* Font size (for all widget types) */}
+                            onMouseDown={e => e.stopPropagation()}
+                            onClick={e => e.stopPropagation()}>
+                            {/* Font size for title/text */}
                             {(w.is_title_block || w.type === 'text_card') && (
                               <>
                                 <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamano de texto</p>
@@ -614,7 +687,7 @@ export default function DashboardBuilder() {
                                   {TEXT_SIZE_OPTIONS.map(opt => (
                                     <button
                                       key={opt.value}
-                                      onMouseDown={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'text_size', opt.value) }}
+                                      onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'text_size', opt.value) }}
                                       className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
                                         (w.text_size || (w.is_title_block ? 'lg' : 'sm')) === opt.value
                                           ? 'bg-primary text-white' : 'bg-[#F3F4F6] hover:bg-gray-200'
@@ -626,14 +699,44 @@ export default function DashboardBuilder() {
                                 </div>
                               </>
                             )}
-                            {/* Color palette (for chart widgets) */}
+                            {/* PROMPT 3: KPI style selector */}
+                            {w.type === 'kpi' && (
+                              <>
+                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Estilo de tarjeta</p>
+                                <div className="flex flex-wrap gap-1 mb-1.5">
+                                  {KPI_STYLE_OPTIONS.map(opt => (
+                                    <button
+                                      key={opt.value}
+                                      onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'kpi_style', opt.value) }}
+                                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                                        ((w as any).kpi_style || 'accent') === opt.value
+                                          ? 'bg-primary text-white' : 'bg-[#F3F4F6] hover:bg-gray-200'
+                                      }`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                                {(w as any).kpi_style === 'progress' && (
+                                  <input
+                                    className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary"
+                                    placeholder="Valor maximo (ej: 1000)"
+                                    type="number"
+                                    value={(w as any).kpi_max_value || ''}
+                                    onClick={e => e.stopPropagation()}
+                                    onChange={e => updateWidgetField(w.grid_i, 'kpi_max_value', parseFloat(e.target.value) || undefined)}
+                                  />
+                                )}
+                              </>
+                            )}
+                            {/* Color palette for chart widgets */}
                             {!w.is_title_block && w.type !== 'text_card' && (
                               <>
                                 <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Paleta</p>
                                 {Object.entries(COLOR_PALETTES).map(([key, pal]) => (
                                   <button
                                     key={key}
-                                    onMouseDown={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'color_palette', key) }}
+                                    onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'color_palette', key) }}
                                     className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-[#F3F4F6] transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}
                                   >
                                     <div className="flex gap-0.5">
@@ -644,23 +747,25 @@ export default function DashboardBuilder() {
                                     <span>{pal.name}</span>
                                   </button>
                                 ))}
-                                <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
-                                  <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Ejes</p>
-                                  <input
-                                    className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary"
-                                    placeholder="Etiqueta eje X"
-                                    value={w.custom_x_label || ''}
-                                    onMouseDown={e => e.stopPropagation()}
-                                    onChange={e => updateWidgetField(w.grid_i, 'custom_x_label', e.target.value)}
-                                  />
-                                  <input
-                                    className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
-                                    placeholder="Etiqueta eje Y"
-                                    value={w.custom_y_label || ''}
-                                    onMouseDown={e => e.stopPropagation()}
-                                    onChange={e => updateWidgetField(w.grid_i, 'custom_y_label', e.target.value)}
-                                  />
-                                </div>
+                                {w.type !== 'kpi' && (
+                                  <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                                    <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Ejes</p>
+                                    <input
+                                      className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary"
+                                      placeholder="Etiqueta eje X"
+                                      value={w.custom_x_label || ''}
+                                      onClick={e => e.stopPropagation()}
+                                      onChange={e => updateWidgetField(w.grid_i, 'custom_x_label', e.target.value)}
+                                    />
+                                    <input
+                                      className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
+                                      placeholder="Etiqueta eje Y"
+                                      value={w.custom_y_label || ''}
+                                      onClick={e => e.stopPropagation()}
+                                      onChange={e => updateWidgetField(w.grid_i, 'custom_y_label', e.target.value)}
+                                    />
+                                  </div>
+                                )}
                               </>
                             )}
                           </div>
@@ -668,7 +773,7 @@ export default function DashboardBuilder() {
                       </div>
                     </div>
 
-                    {/* Content — flex-1 fills remaining space */}
+                    {/* Content */}
                     <div className="flex-1 overflow-hidden flex flex-col" style={{ minHeight: 0 }}>
                       {w.is_title_block ? (
                         <div className="no-drag flex items-center justify-center flex-1 px-4">
@@ -695,8 +800,15 @@ export default function DashboardBuilder() {
                           />
                         </div>
                       ) : w.type === 'kpi' && w.kpi_value !== undefined ? (
-                        <div className="flex-1 flex items-center p-2">
-                          <KpiCard label={w.kpi_label || w.title} value={w.kpi_value} color={PRIMARY_COLOR} />
+                        <div className="flex-1 flex items-center justify-center">
+                          <KpiCard
+                            label={w.kpi_label || w.title}
+                            value={w.kpi_value}
+                            color={PRIMARY_COLOR}
+                            delta={w.kpi_delta}
+                            kpiStyle={(w as any).kpi_style || 'accent'}
+                            maxValue={(w as any).kpi_max_value}
+                          />
                         </div>
                       ) : w.data?.length && w.columns?.length >= 2 ? (
                         <div className="flex-1 p-1" style={{ width: '100%', height: '100%' }}>
@@ -744,7 +856,7 @@ export default function DashboardBuilder() {
         </div>
       </div>
 
-      {/* ─── AI FAB — rendered via portal to ensure fixed positioning ─── */}
+      {/* ─── AI FAB — rendered via portal ─── */}
       {createPortal(
         <>
           <button

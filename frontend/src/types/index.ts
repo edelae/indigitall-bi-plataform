@@ -68,6 +68,8 @@ export interface DashboardWidget {
   kpi_value?: string | number
   kpi_label?: string
   kpi_delta?: number
+  kpi_style?: 'minimal' | 'accent' | 'progress'
+  kpi_max_value?: number
   // Text/title block
   text_content?: string
   text_url?: string

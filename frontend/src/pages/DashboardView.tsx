@@ -38,7 +38,6 @@ export default function DashboardView() {
     getDashboard(parseInt(id))
       .then(d => {
         setDashboard(d)
-        // Reconstruct tabs
         const layout = d.layout || []
         if (layout.length > 0 && layout[0]?.tab_id) {
           const tabMap = new Map<string, DashboardTab>()
@@ -148,8 +147,8 @@ export default function DashboardView() {
         </div>
       )}
 
-      {/* Canvas */}
-      <div className="bg-[#F3F4F6] rounded-b-lg p-3 min-h-[400px]">
+      {/* Canvas — PROMPT 1 FIX: no padding, width 100%, same grid config as builder */}
+      <div className="bg-[#F3F4F6] rounded-b-lg min-h-[400px]" style={{ width: '100%', padding: 0 }}>
         {widgets.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-[#6B7280] mb-4">Este tablero no tiene widgets</p>
@@ -167,13 +166,14 @@ export default function DashboardView() {
             isResizable={false}
             compactType="vertical"
             margin={[8, 8]}
+            containerPadding={[8, 8]}
             style={{ minHeight: 300 }}
           >
             {widgets.map(w => (
               <div key={w.grid_i}>
                 <div className="bg-white rounded-lg h-full flex flex-col overflow-hidden"
                   style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                  {/* Title block — no header */}
+                  {/* Title block */}
                   {w.is_title_block ? (
                     <div className="flex items-center justify-center h-full px-4">
                       <h2 className={`${TEXT_SIZE_CLASS[w.text_size || 'lg']} font-bold text-[#1F2937] text-center`}>{w.text_content || w.title}</h2>
@@ -202,8 +202,15 @@ export default function DashboardView() {
                         style={{ minHeight: 0 }}
                       >
                         {w.type === 'kpi' && w.kpi_value !== undefined ? (
-                          <div className="flex-1 flex items-center p-2">
-                            <KpiCard label={w.kpi_label || w.title} value={w.kpi_value} color={PRIMARY_COLOR} />
+                          <div className="flex-1 flex items-center justify-center">
+                            <KpiCard
+                              label={w.kpi_label || w.title}
+                              value={w.kpi_value}
+                              color={PRIMARY_COLOR}
+                              delta={w.kpi_delta}
+                              kpiStyle={(w as any).kpi_style || 'accent'}
+                              maxValue={(w as any).kpi_max_value}
+                            />
                           </div>
                         ) : w.data?.length && w.columns?.length >= 2 ? (
                           <div className="flex-1 p-1" style={{ width: '100%', height: '100%' }}>
