@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink } from 'lucide-react'
-import { Responsive, WidthProvider } from 'react-grid-layout'
+import { Responsive } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import type { Dashboard, DashboardWidget, ChartType } from '../types'
@@ -10,7 +10,12 @@ import { getDashboard } from '../api/client'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
-const ResponsiveGridLayout = WidthProvider(Responsive)
+// Grid constants — shared between builder and view
+const GRID_COLS = { lg: 12, md: 10, sm: 6, xs: 4 }
+const GRID_BREAKPOINTS = { lg: 1200, md: 996, sm: 768, xs: 480 }
+const GRID_ROW_HEIGHT = 80
+const GRID_MARGIN: [number, number] = [8, 8]
+const GRID_PADDING: [number, number] = [8, 8]
 
 const TEXT_SIZE_CLASS: Record<string, string> = {
   xs: 'text-xs', sm: 'text-sm', base: 'text-base',
@@ -23,6 +28,24 @@ interface DashboardTab {
   widgets: DashboardWidget[]
 }
 
+// Hook to measure container width via ResizeObserver
+function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setWidth(entry.contentRect.width)
+      }
+    })
+    ro.observe(el)
+    setWidth(el.getBoundingClientRect().width)
+    return () => ro.disconnect()
+  }, [ref])
+  return width
+}
+
 export default function DashboardView() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -31,6 +54,8 @@ export default function DashboardView() {
   const [infoModal, setInfoModal] = useState<DashboardWidget | null>(null)
   const [tabs, setTabs] = useState<DashboardTab[]>([])
   const [activeTabId, setActiveTabId] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+  const containerWidth = useContainerWidth(containerRef)
 
   useEffect(() => {
     if (!id) return
@@ -147,8 +172,8 @@ export default function DashboardView() {
         </div>
       )}
 
-      {/* Canvas — PROMPT 1 FIX: no padding, width 100%, same grid config as builder */}
-      <div className="bg-[#F3F4F6] rounded-b-lg min-h-[400px]" style={{ width: '100%', padding: 0 }}>
+      {/* Canvas — uses ResizeObserver measured width, no WidthProvider */}
+      <div ref={containerRef} className="bg-[#F3F4F6] rounded-b-lg min-h-[400px]">
         {widgets.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-[#6B7280] mb-4">Este tablero no tiene widgets</p>
@@ -156,18 +181,18 @@ export default function DashboardView() {
               <Pencil size={14} /> Editar tablero
             </Link>
           </div>
-        ) : (
-          <ResponsiveGridLayout
+        ) : containerWidth > 0 && (
+          <Responsive
+            width={containerWidth}
             layouts={{ lg: gridLayout }}
-            breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480 }}
-            cols={{ lg: 12, md: 10, sm: 6, xs: 4 }}
-            rowHeight={80}
+            breakpoints={GRID_BREAKPOINTS}
+            cols={GRID_COLS}
+            rowHeight={GRID_ROW_HEIGHT}
             isDraggable={false}
             isResizable={false}
             compactType="vertical"
-            margin={[8, 8]}
-            containerPadding={[8, 8]}
-            style={{ minHeight: 300 }}
+            margin={GRID_MARGIN}
+            containerPadding={GRID_PADDING}
           >
             {widgets.map(w => (
               <div key={w.grid_i}>
@@ -208,8 +233,8 @@ export default function DashboardView() {
                               value={w.kpi_value}
                               color={PRIMARY_COLOR}
                               delta={w.kpi_delta}
-                              kpiStyle={(w as any).kpi_style || 'accent'}
-                              maxValue={(w as any).kpi_max_value}
+                              kpiStyle={w.kpi_style || 'accent'}
+                              maxValue={w.kpi_max_value}
                             />
                           </div>
                         ) : w.data?.length && w.columns?.length >= 2 ? (
@@ -218,7 +243,7 @@ export default function DashboardView() {
                               data={w.data}
                               columns={w.columns}
                               chartType={(w.chart_type || w.type || 'bar') as ChartType}
-                              height={Math.max(w.grid_h * 80 - 48, 120)}
+                              height={Math.max(w.grid_h * GRID_ROW_HEIGHT - 48, 120)}
                               colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
                               xLabel={w.custom_x_label}
                               yLabel={w.custom_y_label}
@@ -255,7 +280,7 @@ export default function DashboardView() {
                 </div>
               </div>
             ))}
-          </ResponsiveGridLayout>
+          </Responsive>
         )}
       </div>
 
