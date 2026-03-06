@@ -1,4 +1,4 @@
-"""Dashboard builder callbacks — add/remove/resize widgets, save, edit, AI assistant."""
+"""Dashboard builder callbacks — drag-and-drop grid, add/remove widgets, save, edit, AI assistant."""
 
 import json
 import logging
@@ -7,6 +7,7 @@ from dash import (
     Input, Output, State, callback, html, dcc, ctx, no_update, ALL,
 )
 import dash_bootstrap_components as dbc
+import dash_draggable
 from dash.exceptions import PreventUpdate
 import plotly.express as px
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 CHART_COLORS = ["#1E88E5", "#76C043", "#A0A3BD", "#42A5F5", "#1565C0", "#FFC107", "#9C27B0", "#FF5722"]
 
 
-def _render_widget_chart(data, chart_type, height=300):
+def _render_widget_chart(data, chart_type, height=280):
     """Render a chart from query result data."""
     if not data:
         return html.Div(
@@ -76,62 +77,90 @@ def _render_widget_chart(data, chart_type, height=300):
 
 
 def _render_canvas(widgets):
-    """Render the full widget canvas from the widgets list."""
+    """Render the full widget canvas as a draggable grid."""
     if not widgets:
         return html.Div([
             html.I(className="bi bi-grid-1x2 display-4 text-muted"),
             html.P("Agrega consultas desde el panel lateral para crear widgets.",
                    className="text-muted mt-3"),
+            html.P("Arrastra y redimensiona los widgets libremente.",
+                   className="text-muted", style={"fontSize": "13px"}),
         ], className="text-center py-5", id="builder-empty-state")
 
-    cols = []
+    children = []
+    layout_items = []
+
     for i, w in enumerate(widgets):
-        width = max(w.get("width", 6), 4)  # Minimum 4 columns
+        widget_id = w.get("grid_i", f"widget-{i}")
         chart_type = w.get("type") or w.get("chart_type", "bar")
         title = w.get("title", "Widget")
         data = w.get("data", [])
 
-        card = dbc.Card([
-            dbc.CardHeader([
-                html.Span(title, className="fw-semibold small"),
-                html.Div([
-                    dbc.Button(
-                        html.I(className="bi bi-info-circle"),
-                        id={"type": "builder-widget-info", "index": i},
-                        outline=True, color="secondary", size="sm",
-                        className="me-1",
-                        style={"padding": "1px 5px", "fontSize": "11px"},
-                        title="Ver SQL",
-                    ),
-                    dbc.Button(
-                        html.I(className="bi bi-arrows-angle-expand"),
-                        id={"type": "builder-widget-resize", "index": i},
-                        outline=True, color="secondary", size="sm",
-                        className="me-1",
-                        style={"padding": "1px 5px", "fontSize": "11px"},
-                        title=f"Ancho actual: {width}/12",
-                    ),
-                    dbc.Button(
-                        html.I(className="bi bi-x-lg"),
-                        id={"type": "builder-widget-remove", "index": i},
-                        outline=True, color="danger", size="sm",
-                        style={"padding": "1px 5px", "fontSize": "11px"},
-                        title="Eliminar",
-                    ),
-                ], className="d-flex"),
-            ], className="py-2 px-3 bg-white d-flex justify-content-between align-items-center"),
-            dbc.CardBody(
-                _render_widget_chart(data, chart_type),
-                className="p-2",
-            ),
-        ], className="dashboard-widget h-100", style={
-            "borderRadius": "16px", "border": "1px solid #F0F0F5",
-            "boxShadow": "0 2px 12px rgba(0,0,0,0.04)",
+        # Calculate chart height from grid_h
+        grid_h = w.get("grid_h", 4)
+        chart_height = max(grid_h * 80 - 100, 180)
+
+        card = html.Div(
+            dbc.Card([
+                dbc.CardHeader([
+                    html.Span(title, className="fw-semibold small"),
+                    html.Div([
+                        dbc.Button(
+                            html.I(className="bi bi-info-circle"),
+                            id={"type": "builder-widget-info", "index": i},
+                            outline=True, color="secondary", size="sm",
+                            className="me-1",
+                            style={"padding": "1px 5px", "fontSize": "11px"},
+                            title="Ver SQL",
+                        ),
+                        dbc.Button(
+                            html.I(className="bi bi-x-lg"),
+                            id={"type": "builder-widget-remove", "index": i},
+                            outline=True, color="danger", size="sm",
+                            style={"padding": "1px 5px", "fontSize": "11px"},
+                            title="Eliminar",
+                        ),
+                    ], className="d-flex"),
+                ], className="py-2 px-3 bg-white d-flex justify-content-between align-items-center"),
+                dbc.CardBody(
+                    _render_widget_chart(data, chart_type, height=chart_height),
+                    className="p-2",
+                ),
+            ], className="dashboard-widget h-100", style={
+                "borderRadius": "16px", "border": "1px solid #F0F0F5",
+                "boxShadow": "0 2px 12px rgba(0,0,0,0.04)",
+            }),
+            id=widget_id,
+            style={"height": "100%"},
+        )
+
+        children.append(card)
+
+        # Build layout position
+        grid_x = w.get("grid_x", (i % 2) * 6)
+        grid_y = w.get("grid_y", (i // 2) * 4)
+        grid_w = w.get("grid_w", 6)
+
+        layout_items.append({
+            "i": widget_id,
+            "x": grid_x,
+            "y": grid_y,
+            "w": grid_w,
+            "h": grid_h,
         })
 
-        cols.append(dbc.Col(card, md=width, className="mb-3"))
-
-    return dbc.Row(cols, className="g-3")
+    return dash_draggable.ResponsiveGridLayout(
+        id="builder-grid",
+        children=children,
+        layouts={"lg": layout_items},
+        gridCols={"lg": 12, "md": 10, "sm": 6, "xs": 4},
+        rowHeight=80,
+        isDraggable=True,
+        isResizable=True,
+        compactType="vertical",
+        margin=[16, 16],
+        style={"minHeight": "400px"},
+    )
 
 
 # --- 1. Load available queries for panel ---
@@ -215,6 +244,9 @@ def add_widget(n_clicks_list, widgets, tenant):
     viz = query.get("visualizations") or []
     chart_type = viz[0].get("type", "bar") if viz else "bar"
 
+    widgets = widgets or []
+    idx = len(widgets)
+
     widget = {
         "query_id": query_id,
         "title": query["name"][:60],
@@ -225,9 +257,14 @@ def add_widget(n_clicks_list, widgets, tenant):
         "columns": [c["name"] for c in (query.get("result_columns") or [])],
         "sql": query.get("generated_sql") or "",
         "query_text": query.get("query_text") or "",
+        # Grid position: auto-place at bottom
+        "grid_i": f"widget-{idx}",
+        "grid_x": 0,
+        "grid_y": 9999,  # Auto-place at bottom (compactType handles it)
+        "grid_w": 6,
+        "grid_h": 4,
     }
 
-    widgets = widgets or []
     widgets.append(widget)
     return widgets
 
@@ -256,28 +293,44 @@ def remove_widget(n_clicks_list, widgets):
     return widgets
 
 
-# --- 4. Resize widget (cycle 4 → 6 → 12 → 4) ---
+# --- 4. Sync grid positions back to widgets store ---
 
 @callback(
     Output("builder-widgets", "data", allow_duplicate=True),
-    Input({"type": "builder-widget-resize", "index": ALL}, "n_clicks"),
+    Input("builder-grid", "layouts"),
     State("builder-widgets", "data"),
     prevent_initial_call=True,
 )
-def resize_widget(n_clicks_list, widgets):
-    if not any(n_clicks_list):
+def sync_grid_positions(layouts, widgets):
+    """Update widget positions when the user drags or resizes."""
+    if not layouts or not widgets:
         raise PreventUpdate
 
-    triggered = ctx.triggered_id
-    if not isinstance(triggered, dict):
+    lg_layout = layouts.get("lg", [])
+    if not lg_layout:
         raise PreventUpdate
 
-    idx = triggered["index"]
-    widgets = widgets or []
-    if 0 <= idx < len(widgets):
-        current = widgets[idx].get("width", 6)
-        cycle = {4: 6, 6: 12, 12: 4}
-        widgets[idx]["width"] = cycle.get(current, 6)
+    # Build a map from widget id to position
+    pos_map = {}
+    for item in lg_layout:
+        pos_map[item["i"]] = item
+
+    changed = False
+    for i, w in enumerate(widgets):
+        widget_id = w.get("grid_i", f"widget-{i}")
+        if widget_id in pos_map:
+            pos = pos_map[widget_id]
+            if (w.get("grid_x") != pos["x"] or w.get("grid_y") != pos["y"]
+                    or w.get("grid_w") != pos["w"] or w.get("grid_h") != pos["h"]):
+                w["grid_x"] = pos["x"]
+                w["grid_y"] = pos["y"]
+                w["grid_w"] = pos["w"]
+                w["grid_h"] = pos["h"]
+                w["width"] = pos["w"]  # Keep backward compat
+                changed = True
+
+    if not changed:
+        raise PreventUpdate
 
     return widgets
 
@@ -385,6 +438,15 @@ def load_from_url(search, widgets, tenant):
             raise PreventUpdate
 
         loaded_widgets = dashboard.get("layout") or []
+        # Ensure all widgets have grid_* fields
+        for i, w in enumerate(loaded_widgets):
+            if "grid_i" not in w:
+                w["grid_i"] = f"widget-{i}"
+                w["grid_x"] = (i % 2) * 6
+                w["grid_y"] = (i // 2) * 4
+                w["grid_w"] = w.get("width", 6)
+                w["grid_h"] = 4
+
         name = dashboard.get("name", "")
         description = dashboard.get("description") or ""
         return loaded_widgets, name, description, int(edit_id)
@@ -409,6 +471,11 @@ def load_from_url(search, widgets, tenant):
             "columns": [c["name"] for c in (query.get("result_columns") or [])],
             "sql": query.get("generated_sql") or "",
             "query_text": query.get("query_text") or "",
+            "grid_i": "widget-0",
+            "grid_x": 0,
+            "grid_y": 0,
+            "grid_w": 6,
+            "grid_h": 4,
         }
 
         widgets = widgets or []
@@ -522,7 +589,7 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
 
     # Collect NL questions from AI or fallback
     nl_questions = []
-    add_existing_ids = []  # query_ids from saved queries to suggest adding
+    add_existing_ids = []
 
     try:
         from app.services.dashboard_ai_service import DashboardAIService
@@ -539,7 +606,6 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
             "backgroundColor": "#F5F7FA", "borderRadius": "12px",
         }))
 
-        # Separate: saved queries to add directly vs NL questions to execute
         for sug in suggestions:
             q_id = sug.get("query_id")
             if q_id:
@@ -548,7 +614,6 @@ def builder_ai_chat(n_clicks, message, widgets, tenant):
             if sug_title and not q_id:
                 nl_questions.append(sug_title)
 
-        # Also generate NL suggestions based on user description
         if len(nl_questions) < 3:
             fallback_qs = _generate_nl_suggestions(message)
             for q in fallback_qs:
@@ -639,15 +704,6 @@ def execute_ai_chip(n_clicks_list, suggestion_texts, widgets, tenant):
 
     question = suggestion_texts[idx]
 
-    # Show loading state
-    loading_msg = html.Div([
-        dbc.Spinner(size="sm", color="primary", className="me-2"),
-        html.Small(f"Ejecutando: {question}...", className="fw-semibold"),
-    ], className="p-3 mb-2", style={
-        "backgroundColor": "#FFF8E1", "borderRadius": "12px",
-    })
-
-    # Execute via AIAgent
     try:
         from app.services.data_service import DataService
         from app.services.ai_agent import AIAgent
@@ -665,6 +721,9 @@ def execute_ai_chip(n_clicks_list, suggestion_texts, widgets, tenant):
             chart_type = result.get("chart_type") or "bar"
             query_details = result.get("query_details") or {}
 
+            widgets = widgets or []
+            widget_idx = len(widgets)
+
             widget = {
                 "title": question[:60],
                 "type": chart_type,
@@ -674,9 +733,13 @@ def execute_ai_chip(n_clicks_list, suggestion_texts, widgets, tenant):
                 "columns": list(df.columns),
                 "sql": query_details.get("sql", ""),
                 "query_text": question,
+                "grid_i": f"widget-{widget_idx}",
+                "grid_x": 0,
+                "grid_y": 9999,
+                "grid_w": 6,
+                "grid_h": 4,
             }
 
-            widgets = widgets or []
             widgets.append(widget)
 
             success_msg = html.Div([
@@ -719,28 +782,28 @@ def _generate_nl_suggestions(user_description: str) -> list:
     suggestions = []
 
     if any(kw in desc_lower for kw in ["tendencia", "tiempo", "evolucion", "diario"]):
-        suggestions.append("¿Cual es la tendencia de mensajes por dia?")
+        suggestions.append("Cual es la tendencia de mensajes por dia?")
     if any(kw in desc_lower for kw in ["canal", "whatsapp", "sms", "email"]):
-        suggestions.append("¿Que canal tiene mayor volumen de mensajes?")
+        suggestions.append("Que canal tiene mayor volumen de mensajes?")
     if any(kw in desc_lower for kw in ["agente", "rendimiento", "equipo"]):
-        suggestions.append("¿Cual es el rendimiento de los agentes?")
+        suggestions.append("Cual es el rendimiento de los agentes?")
     if any(kw in desc_lower for kw in ["contacto", "cliente", "usuario"]):
-        suggestions.append("¿Cuales son los contactos mas activos?")
+        suggestions.append("Cuales son los contactos mas activos?")
     if any(kw in desc_lower for kw in ["hora", "horario", "pico"]):
-        suggestions.append("¿Cual es el horario pico de mensajes?")
+        suggestions.append("Cual es el horario pico de mensajes?")
     if any(kw in desc_lower for kw in ["fallback", "bot", "chatbot"]):
-        suggestions.append("¿Cual es la tasa de fallback del bot?")
+        suggestions.append("Cual es la tasa de fallback del bot?")
     if any(kw in desc_lower for kw in ["semana", "dia de la semana"]):
-        suggestions.append("¿Que dia de la semana tiene mas mensajes?")
+        suggestions.append("Que dia de la semana tiene mas mensajes?")
     if any(kw in desc_lower for kw in ["resumen", "general", "kpi"]):
         suggestions.append("Dame un resumen general de los datos")
 
     defaults = [
         "Dame un resumen general de los datos",
-        "¿Cual es la tendencia de mensajes por dia?",
-        "¿Cuales son los contactos mas activos?",
-        "¿Cual es el rendimiento de los agentes?",
-        "¿Cual es la tasa de fallback del bot?",
+        "Cual es la tendencia de mensajes por dia?",
+        "Cuales son los contactos mas activos?",
+        "Cual es el rendimiento de los agentes?",
+        "Cual es la tasa de fallback del bot?",
     ]
     for d in defaults:
         if d not in suggestions and len(suggestions) < 5:

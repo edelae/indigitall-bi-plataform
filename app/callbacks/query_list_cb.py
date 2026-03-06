@@ -93,6 +93,7 @@ def _query_row(q):
     )
 
     # Info column
+    has_conversation = bool(q.get("conversation_history"))
     info_col = dbc.Col([
         html.Div([
             html.A(
@@ -112,6 +113,9 @@ def _query_row(q):
                       style={"fontSize": "10px"}),
             dbc.Badge(f"{row_count} filas", color="light", text_color="dark",
                       className="me-1", style={"fontSize": "10px"}),
+            dbc.Badge([html.I(className="bi bi-chat-left-text me-1"), "Chat"],
+                      color="success", className="me-1",
+                      style={"fontSize": "10px"}) if has_conversation else None,
             html.Small(_format_date(q.get("created_at")),
                        className="text-muted", style={"fontSize": "11px"}),
         ], className="mt-1"),

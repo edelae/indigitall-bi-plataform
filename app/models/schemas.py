@@ -363,6 +363,7 @@ class SavedQuery(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     updated_by = Column(String(100))
     last_run_at = Column(DateTime(timezone=True))
+    conversation_history = Column(JSONB, nullable=True)
 
     __table_args__ = (
         Index("idx_saved_queries_tenant", "tenant_id"),

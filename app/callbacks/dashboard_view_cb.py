@@ -1,10 +1,11 @@
-"""Dashboard view callbacks — load, render widgets, info modal, cross-filter, AI chat."""
+"""Dashboard view callbacks — load, render widgets with grid, info modal, widget→query nav, cross-filter, AI chat."""
 
 import pandas as pd
 from dash import (
     Input, Output, State, callback, html, dcc, ctx, no_update, ALL,
 )
 import dash_bootstrap_components as dbc
+import dash_draggable
 from dash.exceptions import PreventUpdate
 import plotly.express as px
 
@@ -19,12 +20,25 @@ STATIC_DASHBOARD_ROUTES = {
 }
 
 
+def _migrate_legacy_layout(layout_data):
+    """Assign grid positions to legacy dashboards that don't have grid_* fields."""
+    for i, w in enumerate(layout_data):
+        if "grid_i" not in w:
+            w["grid_i"] = f"widget-{i}"
+            w["grid_x"] = (i % 2) * 6
+            w["grid_y"] = (i // 2) * 4
+            w["grid_w"] = w.get("width", 6)
+            w["grid_h"] = 4
+    return layout_data
+
+
 def _render_widget(widget, index):
-    """Render a single dashboard widget card with info button."""
+    """Render a single dashboard widget as an html.Div (for grid layout)."""
     widget_type = widget.get("type") or widget.get("chart_type", "table")
     title = widget.get("title", "Widget")
     data = widget.get("data", [])
     columns = widget.get("columns", [])
+    query_id = widget.get("query_id")
 
     body_content = []
 
@@ -69,9 +83,9 @@ def _render_widget(widget, index):
                 fig = px.bar(df, x=x_col, y=y_col, labels=label_map,
                              color_discrete_sequence=CHART_COLORS)
 
-            # Determine chart height based on widget width
-            width = widget.get("width", 6)
-            chart_height = 300 if width <= 4 else 350 if width <= 6 else 400
+            # Calculate chart height from grid_h
+            grid_h = widget.get("grid_h", 4)
+            chart_height = max(grid_h * 80 - 100, 200)
 
             fig.update_layout(
                 template="plotly_white",
@@ -91,7 +105,7 @@ def _render_widget(widget, index):
             )
             body_content.append(
                 dcc.Graph(
-                    id={"type": "dv-widget-chart", "index": index},
+                    id={"type": "widget-chart", "index": index},
                     figure=fig,
                     config={"displayModeBar": False},
                 )
@@ -120,10 +134,9 @@ def _render_widget(widget, index):
                 )
             )
 
-    # Enforce minimum width of 4 Bootstrap columns
-    col_width = max(widget.get("width", 6), 4)
+    widget_id = widget.get("grid_i", f"widget-{index}")
 
-    return dbc.Col(
+    return html.Div(
         dbc.Card([
             dbc.CardHeader([
                 html.Span(title, className="fw-semibold small"),
@@ -140,8 +153,8 @@ def _render_widget(widget, index):
             "borderRadius": "16px", "border": "1px solid #F0F0F5",
             "boxShadow": "0 2px 12px rgba(0,0,0,0.04)",
         }),
-        md=col_width,
-        className="mb-3",
+        id=widget_id,
+        style={"height": "100%"},
     )
 
 
@@ -198,8 +211,41 @@ def load_dashboard(pathname, tenant):
             description,
         )
 
-    widgets = [_render_widget(w, i) for i, w in enumerate(layout_data)]
-    return dbc.Row(widgets, className="g-3"), dashboard_name, description
+    # Ensure all widgets have grid_* fields (backward compat)
+    layout_data = _migrate_legacy_layout(layout_data)
+
+    # Build grid children and layout
+    children = []
+    grid_items = []
+
+    for i, w in enumerate(layout_data):
+        widget_div = _render_widget(w, i)
+        children.append(widget_div)
+
+        widget_id = w.get("grid_i", f"widget-{i}")
+        grid_items.append({
+            "i": widget_id,
+            "x": w.get("grid_x", (i % 2) * 6),
+            "y": w.get("grid_y", (i // 2) * 4),
+            "w": w.get("grid_w", w.get("width", 6)),
+            "h": w.get("grid_h", 4),
+            "static": True,  # View-only: no dragging
+        })
+
+    grid = dash_draggable.ResponsiveGridLayout(
+        id="dashboard-view-grid",
+        children=children,
+        layouts={"lg": grid_items},
+        gridCols={"lg": 12, "md": 10, "sm": 6, "xs": 4},
+        rowHeight=80,
+        isDraggable=False,
+        isResizable=False,
+        compactType="vertical",
+        margin=[16, 16],
+        style={"minHeight": "300px"},
+    )
+
+    return grid, dashboard_name, description
 
 
 # --- Info modal ---
@@ -302,13 +348,66 @@ def show_widget_info(n_clicks_list, pathname, tenant):
     return True, title, html.Div(body)
 
 
+# --- Widget→Query navigation: click on chart redirects to query ---
+
+@callback(
+    Output("url", "pathname", allow_duplicate=True),
+    Output("url", "search", allow_duplicate=True),
+    Input({"type": "widget-chart", "index": ALL}, "clickData"),
+    State("url", "pathname"),
+    State("tenant-context", "data"),
+    prevent_initial_call=True,
+)
+def widget_click_navigate(click_data_list, pathname, tenant):
+    """When user clicks on a chart widget, navigate to the original query."""
+    if not any(click_data_list):
+        raise PreventUpdate
+
+    triggered = ctx.triggered_id
+    if not isinstance(triggered, dict) or triggered.get("type") != "widget-chart":
+        raise PreventUpdate
+
+    idx = triggered["index"]
+
+    # Load dashboard to find widget's query_id
+    if not pathname or not pathname.startswith("/tableros/saved/"):
+        raise PreventUpdate
+
+    parts = pathname.strip("/").split("/")
+    if len(parts) < 3:
+        raise PreventUpdate
+
+    dashboard_id = parts[2]
+    svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
+    result = svc.get_dashboard(dashboard_id)
+
+    if not result:
+        raise PreventUpdate
+
+    layout_data = result.get("layout") or []
+    if idx >= len(layout_data):
+        raise PreventUpdate
+
+    w = layout_data[idx]
+    query_id = w.get("query_id")
+    query_text = w.get("query_text", "")
+
+    if query_id:
+        return "/consultas/nueva", f"?rerun={query_id}"
+    elif query_text:
+        import urllib.parse
+        return "/consultas/nueva", f"?q={urllib.parse.quote(query_text)}"
+
+    raise PreventUpdate
+
+
 # --- Cross-filter: click on chart stores filter ---
 
 @callback(
     Output("dv-cross-filter", "data"),
     Output("dv-filter-badge", "children"),
-    Input({"type": "dv-widget-chart", "index": ALL}, "clickData"),
-    Input("dv-clear-filter", "n_clicks") if False else Input("url", "pathname"),
+    Input({"type": "widget-chart", "index": ALL}, "clickData"),
+    Input("url", "pathname"),
     State("dv-cross-filter", "data"),
     prevent_initial_call=True,
 )
@@ -320,7 +419,7 @@ def handle_cross_filter(click_data_list, pathname, current_filter):
         return None, ""
 
     # Handle chart click
-    if isinstance(triggered, dict) and triggered.get("type") == "dv-widget-chart":
+    if isinstance(triggered, dict) and triggered.get("type") == "widget-chart":
         for cd in click_data_list:
             if cd and cd.get("points"):
                 point = cd["points"][0]
@@ -330,13 +429,6 @@ def handle_cross_filter(click_data_list, pathname, current_filter):
                     badge = dbc.Alert([
                         html.I(className="bi bi-funnel me-2"),
                         f"Filtro activo: {label}",
-                        dbc.Button(
-                            html.I(className="bi bi-x"),
-                            id="dv-clear-filter-btn",
-                            outline=True, color="light", size="sm",
-                            className="ms-2",
-                            style={"padding": "0 4px"},
-                        ),
                     ], color="info", className="mb-3 d-flex align-items-center py-2",
                        style={"fontSize": "13px"})
                     return filter_data, badge

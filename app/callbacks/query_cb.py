@@ -1,8 +1,6 @@
 """
-Query page callbacks — AI chat interaction, results rendering, save/export.
-
-This is the core interaction page: user asks questions in the chat panel,
-AI processes them, results appear in the right panel with table + chart.
+Query page callbacks — AI chat interaction, chart type selector, Redash-style source panel,
+conversation persistence, results rendering, save/export.
 """
 
 import pandas as pd
@@ -17,11 +15,15 @@ import plotly.express as px
 from app.services.data_service import DataService
 from app.services.ai_agent import AIAgent
 from app.services.storage_service import StorageService
+from app.services.schema_service import SchemaService
 from app.services.label_service import get_label
 from app.config import settings
 
 # Chart color sequence from design system
 CHART_COLORS = ["#1E88E5", "#76C043", "#A0A3BD", "#42A5F5", "#1565C0", "#FFC107", "#9C27B0", "#FF5722"]
+
+# Chart type definitions (must match query.py CHART_TYPES)
+CHART_TYPE_LIST = ["bar", "line", "pie", "area", "histogram", "table"]
 
 # Suggestion chips (must match query.py SUGGESTIONS order and content)
 SUGGESTIONS = [
@@ -76,7 +78,7 @@ def _auto_chart(df, chart_type=None):
 
     label_map = {c: get_label(c) for c in df.columns}
 
-    # Determine chart type: AI-suggested > auto-detect
+    # Determine chart type: explicit > AI-suggested > auto-detect
     if not chart_type:
         x_lower = x_col.lower()
         if any(kw in x_lower for kw in ["date", "fecha", "time", "dia", "mes", "month"]):
@@ -85,6 +87,9 @@ def _auto_chart(df, chart_type=None):
             chart_type = "pie"
         else:
             chart_type = "bar"
+
+    if chart_type == "table":
+        return None
 
     if chart_type == "line":
         fig = px.line(df, x=x_col, y=y_col, labels=label_map, color_discrete_sequence=CHART_COLORS)
@@ -114,166 +119,206 @@ def _auto_chart(df, chart_type=None):
     return fig
 
 
-def _get_source_table_name(ai_function):
-    """Map AI function names to their source database table."""
-    TABLE_MAP = {
-        "summary": "messages",
-        "fallback_rate": "messages",
-        "messages_by_direction": "messages",
-        "messages_by_hour": "messages",
-        "messages_over_time": "messages",
-        "messages_by_day_of_week": "messages",
-        "top_contacts": "messages",
-        "intent_distribution": "messages",
-        "agent_performance": "messages",
-        "entity_comparison": "messages",
-        "high_messages_day": "messages",
-        "high_messages_week": "messages",
-        "high_messages_month": "messages",
-    }
-    return TABLE_MAP.get(ai_function, "messages")
+def _build_results_panel(df, chart_type, query_details):
+    """Build the main results panel with chart + mini table side by side."""
+    results = []
 
+    if not df.empty:
+        fig = _auto_chart(df, chart_type)
 
-def _fetch_full_source_table(table_name, tenant):
-    """Fetch full source table with all columns (limited to 200 rows)."""
-    from sqlalchemy import text as sa_text
-    from app.models.database import engine as db_engine
-    try:
-        safe_tables = {
-            "messages", "contacts", "agents", "daily_stats",
-            "chat_conversations", "chat_channels", "chat_topics",
-            "campaigns", "toques_daily", "toques_heatmap", "toques_usuario",
-            "fact_message_events", "dim_date", "dim_time", "dim_channel",
-            "dim_event_type", "dim_tenant", "dim_contact", "dim_agent",
-            "dim_campaign", "dim_conversation",
-        }
-        if table_name not in safe_tables:
-            table_name = "messages"
+        if fig:
+            # Chart (col-8) + mini table preview (col-4) side by side
+            from dash import dash_table
+            mini_data = df.head(5).to_dict("records")
+            results.append(
+                dbc.Row([
+                    dbc.Col(
+                        dcc.Graph(figure=fig, config={"displayModeBar": False}, className="mb-2"),
+                        md=8,
+                    ),
+                    dbc.Col(
+                        dash_table.DataTable(
+                            data=mini_data,
+                            columns=[{"name": get_label(c), "id": c} for c in df.columns],
+                            page_size=5,
+                            style_table={"overflowX": "auto", "fontSize": "11px"},
+                            style_header={
+                                "backgroundColor": "#F5F7FA", "fontWeight": "600",
+                                "fontSize": "11px", "color": "#6E7191",
+                            },
+                            style_cell={
+                                "fontSize": "11px", "fontFamily": "Inter, sans-serif",
+                                "padding": "4px 6px",
+                            },
+                        ),
+                        md=4,
+                    ),
+                ], className="g-2 mb-3")
+            )
+        else:
+            # Table-only view (chart_type == "table" or no chart possible)
+            from dash import dash_table
+            results.append(
+                dash_table.DataTable(
+                    data=df.to_dict("records"),
+                    columns=[{"name": get_label(c), "id": c} for c in df.columns],
+                    page_size=15,
+                    style_table={"overflowX": "auto"},
+                    style_header={
+                        "backgroundColor": "#F5F7FA", "fontWeight": "600",
+                        "fontSize": "13px", "color": "#6E7191", "textTransform": "uppercase",
+                    },
+                    style_cell={
+                        "fontSize": "13px", "fontFamily": "Inter, sans-serif",
+                        "padding": "8px 12px",
+                    },
+                    style_data_conditional=[{
+                        "if": {"row_index": "odd"}, "backgroundColor": "#FAFBFC",
+                    }],
+                )
+            )
 
-        sql = f"SELECT * FROM {table_name}"
-        if tenant:
-            sql += f" WHERE tenant_id = :tenant"
-        sql += " ORDER BY 1 DESC LIMIT 200"
+        results.append(html.Small(f"{len(df)} filas", className="text-muted mt-2 d-block"))
 
-        with db_engine.connect() as conn:
-            if tenant:
-                return pd.read_sql(sa_text(sql), conn, params={"tenant": tenant})
-            return pd.read_sql(sa_text(sql), conn)
-    except Exception:
-        return pd.DataFrame()
+        # Show SQL details if it was an ad-hoc query
+        if query_details and query_details.get("sql"):
+            results.append(
+                dbc.Accordion([
+                    dbc.AccordionItem(
+                        html.Pre(query_details["sql"], className="bg-light p-3 rounded small"),
+                        title="Ver SQL generado",
+                    ),
+                ], start_collapsed=True, className="mt-2")
+            )
+    else:
+        results.append(html.Div([
+            html.I(className="bi bi-info-circle display-4 text-muted"),
+            html.P("Sin datos para mostrar.", className="text-muted mt-3"),
+        ], className="text-center py-5"))
+
+    return results
 
 
 def _build_source_tab(df, ai_function, query_details, tenant=None):
-    """Build the 'Fuente de Datos' tab showing the FULL source table."""
-    if df.empty:
-        return html.Div([
-            html.I(className="bi bi-database display-4 text-muted"),
-            html.P("Sin datos para mostrar.", className="text-muted mt-3"),
-        ], className="text-center py-5")
-
+    """Build the Redash-style 'Fuente de Datos' tab with sidebar + SQL + results."""
     from dash import dash_table
-
-    # Determine source table and fetch ALL columns
-    if query_details and query_details.get("sql"):
-        # For ad-hoc SQL, extract table name from query
-        import re
-        match = re.search(r"FROM\s+(\w+)", query_details["sql"], re.IGNORECASE)
-        source_table = match.group(1) if match else "messages"
-    else:
-        source_table = _get_source_table_name(ai_function)
-
-    full_df = _fetch_full_source_table(source_table, tenant)
-    if full_df.empty:
-        full_df = df  # Fallback to result df if source fetch fails
 
     elements = []
 
-    # Metadata badges
-    badges = []
-    badges.append(dbc.Badge(f"Tabla: {source_table}", color="dark", className="me-2"))
-    if ai_function:
-        badges.append(dbc.Badge(f"Funcion: {ai_function}", color="primary", className="me-2"))
-    badges.append(dbc.Badge(
-        f"{len(full_df)} filas x {len(full_df.columns)} columnas",
-        color="info", className="me-2",
-    ))
-    if query_details and query_details.get("sql"):
-        badges.append(dbc.Badge("SQL Ad-hoc", color="warning", className="me-2"))
-    elements.append(html.Div(badges, className="mb-3"))
+    # 3-panel layout: sidebar (col-3) + right panel (col-9)
+    try:
+        schema_svc = SchemaService()
+        tables_with_cols = schema_svc.list_all_tables_with_columns()
+    except Exception:
+        tables_with_cols = []
 
-    # Column schema table (from the FULL source table)
-    schema_rows = []
-    for col in full_df.columns:
-        dtype = str(full_df[col].dtype)
-        nulls = int(full_df[col].isna().sum())
-        unique = int(full_df[col].nunique())
-        schema_rows.append({
-            "columna": col,
-            "label": get_label(col),
-            "tipo": dtype,
-            "nulos": nulls,
-            "unicos": unique,
-        })
+    # Build sidebar with collapsible table tree
+    sidebar_items = []
+    for table_info in tables_with_cols:
+        tname = table_info["table_name"]
+        row_count = table_info.get("row_count", 0)
+        cols = table_info.get("columns", [])
 
-    elements.append(html.H6("Esquema de Columnas (tabla completa)", className="mt-2 mb-2"))
-    elements.append(
-        dash_table.DataTable(
-            data=schema_rows,
-            columns=[
-                {"name": "Columna", "id": "columna"},
-                {"name": "Label", "id": "label"},
-                {"name": "Tipo", "id": "tipo"},
-                {"name": "Nulos", "id": "nulos"},
-                {"name": "Unicos", "id": "unicos"},
-            ],
-            page_size=10,
-            style_table={"overflowX": "auto"},
-            style_header={
-                "backgroundColor": "#F5F7FA",
-                "fontWeight": "600",
-                "fontSize": "12px",
-            },
-            style_cell={"fontSize": "12px", "fontFamily": "Inter, sans-serif", "padding": "6px 8px"},
+        col_list = []
+        for col in cols:
+            dtype_badge = dbc.Badge(
+                col["data_type"][:15], color="light", text_color="dark",
+                className="ms-auto", style={"fontSize": "9px"},
+            )
+            col_list.append(
+                html.Div([
+                    html.Small(col["column_name"], style={"fontSize": "12px", "color": "#1A1A2E"}),
+                    dtype_badge,
+                ], className="d-flex align-items-center justify-content-between py-1 px-2",
+                   style={"borderBottom": "1px solid #F5F7FA"})
+            )
+
+        sidebar_items.append(
+            dbc.AccordionItem(
+                html.Div(col_list) if col_list else html.Small("Sin columnas", className="text-muted"),
+                title=html.Span([
+                    tname,
+                    dbc.Badge(f"{row_count}", color="info", className="ms-2", style={"fontSize": "9px"}),
+                ]),
+            )
         )
-    )
 
-    # SQL query if ad-hoc
+    sidebar = html.Div([
+        dbc.Input(
+            id="source-table-search",
+            placeholder="Buscar tabla...",
+            size="sm", className="mb-2",
+            style={"borderRadius": "8px", "fontSize": "12px"},
+        ),
+        dbc.Accordion(
+            sidebar_items,
+            start_collapsed=True,
+            className="source-table-tree",
+        ) if sidebar_items else html.Small("No hay tablas disponibles.", className="text-muted"),
+    ], className="source-sidebar")
+
+    # Right panel: SQL + Results
+    sql_text = ""
     if query_details and query_details.get("sql"):
-        elements.append(html.H6("SQL Ejecutado", className="mt-3 mb-2"))
-        elements.append(html.Pre(query_details["sql"], className="bg-light p-3 rounded small"))
+        sql_text = query_details["sql"]
+    elif ai_function:
+        sql_text = f"-- Funcion pre-construida: {ai_function}"
 
-    # Full source table data with ALL columns
-    elements.append(html.H6(
-        f"Datos Completos — {source_table} (primeras {len(full_df)} filas)",
-        className="mt-3 mb-2",
-    ))
-    elements.append(
-        dash_table.DataTable(
-            data=full_df.to_dict("records"),
-            columns=[{"name": get_label(c), "id": c} for c in full_df.columns],
+    sql_panel = html.Div([
+        html.Div([
+            html.Small("SQL Ejecutado", className="fw-bold", style={"color": "#A0A3BD", "fontSize": "11px"}),
+        ], className="mb-1"),
+        html.Pre(
+            sql_text or "-- Sin SQL disponible",
+            className="source-sql-panel",
+        ),
+    ])
+
+    # Results table
+    if not df.empty:
+        results_table = dash_table.DataTable(
+            data=df.to_dict("records"),
+            columns=[{"name": get_label(c), "id": c} for c in df.columns],
             page_size=20,
             sort_action="native",
             filter_action="native",
             style_table={"overflowX": "auto"},
             style_header={
-                "backgroundColor": "#F5F7FA",
-                "fontWeight": "600",
-                "fontSize": "12px",
-                "color": "#6E7191",
+                "backgroundColor": "#F5F7FA", "fontWeight": "600",
+                "fontSize": "12px", "color": "#6E7191",
             },
             style_cell={
-                "fontSize": "12px",
-                "fontFamily": "Inter, sans-serif",
-                "padding": "6px 8px",
-                "maxWidth": "200px",
-                "overflow": "hidden",
-                "textOverflow": "ellipsis",
+                "fontSize": "12px", "fontFamily": "Inter, sans-serif",
+                "padding": "6px 8px", "maxWidth": "200px",
+                "overflow": "hidden", "textOverflow": "ellipsis",
             },
             style_data_conditional=[{
-                "if": {"row_index": "odd"},
-                "backgroundColor": "#FAFBFC",
+                "if": {"row_index": "odd"}, "backgroundColor": "#FAFBFC",
             }],
         )
+    else:
+        results_table = html.Div([
+            html.I(className="bi bi-database display-4 text-muted"),
+            html.P("Sin datos para mostrar.", className="text-muted mt-3"),
+        ], className="text-center py-4")
+
+    right_panel = html.Div([sql_panel, html.Hr(className="my-2"), results_table])
+
+    # Metadata badges
+    badges = []
+    if ai_function:
+        badges.append(dbc.Badge(f"Funcion: {ai_function}", color="primary", className="me-2"))
+    if not df.empty:
+        badges.append(dbc.Badge(f"{len(df)} filas x {len(df.columns)} columnas", color="info", className="me-2"))
+    if query_details and query_details.get("sql"):
+        badges.append(dbc.Badge("SQL Ad-hoc", color="warning", className="me-2"))
+
+    elements.append(html.Div(badges, className="mb-2"))
+    elements.append(
+        dbc.Row([
+            dbc.Col(sidebar, md=3, className="source-sidebar-col"),
+            dbc.Col(right_panel, md=9),
+        ], className="g-2")
     )
 
     return html.Div(elements)
@@ -290,6 +335,8 @@ def _build_source_tab(df, ai_function, query_details, tenant=None):
     Output("query-result", "data"),
     Output("download-csv-btn", "disabled"),
     Output("save-query-btn", "disabled"),
+    Output("chart-type-toolbar", "style"),
+    Output("current-chart-type", "data"),
     Input("chat-send-btn", "n_clicks"),
     Input("chat-input", "n_submit"),
     State("chat-input", "value"),
@@ -343,62 +390,9 @@ def send_message(n_clicks, n_submit, message, tenant, history):
             chat_elements.append(_render_assistant_message(msg["content"]))
 
     # Render results panel
-    results = []
-    if not df.empty:
-        # Chart (if applicable)
-        fig = _auto_chart(df, chart_type)
-        if fig:
-            results.append(dcc.Graph(figure=fig, className="mb-3"))
+    results = _build_results_panel(df, chart_type, query_details)
 
-        # Data table
-        from dash import dash_table
-        results.append(
-            dash_table.DataTable(
-                data=df.to_dict("records"),
-                columns=[{"name": get_label(c), "id": c} for c in df.columns],
-                page_size=15,
-                style_table={"overflowX": "auto"},
-                style_header={
-                    "backgroundColor": "#F5F7FA",
-                    "fontWeight": "600",
-                    "fontSize": "13px",
-                    "color": "#6E7191",
-                    "textTransform": "uppercase",
-                },
-                style_cell={
-                    "fontSize": "13px",
-                    "fontFamily": "Inter, sans-serif",
-                    "padding": "8px 12px",
-                },
-                style_data_conditional=[{
-                    "if": {"row_index": "odd"},
-                    "backgroundColor": "#FAFBFC",
-                }],
-            )
-        )
-
-        results.append(html.Small(f"{len(df)} filas", className="text-muted mt-2 d-block"))
-
-        # Show SQL details if it was an ad-hoc query
-        if query_details and query_details.get("sql"):
-            results.append(
-                dbc.Accordion([
-                    dbc.AccordionItem(
-                        html.Pre(
-                            query_details["sql"],
-                            className="bg-light p-3 rounded small",
-                        ),
-                        title="Ver SQL generado",
-                    ),
-                ], start_collapsed=True, className="mt-2")
-            )
-    else:
-        results.append(html.Div([
-            html.I(className="bi bi-info-circle display-4 text-muted"),
-            html.P(explanation, className="text-muted mt-3"),
-        ], className="text-center py-5"))
-
-    # Build source-data tab content (full source table with all columns)
+    # Build source-data tab content (Redash-style)
     source_content = _build_source_tab(df, ai_function, query_details, tenant=tenant)
 
     # Store query result for CSV export / save
@@ -414,7 +408,46 @@ def send_message(n_clicks, n_submit, message, tenant, history):
     }
 
     has_data = not df.empty
-    return chat_elements, results, source_content, "", history, query_data, not has_data, not has_data
+    # Show chart type toolbar only when there is data with 2+ columns
+    show_toolbar = {"display": "block"} if has_data and len(df.columns) >= 2 else {"display": "none"}
+
+    return (
+        chat_elements, results, source_content, "", history, query_data,
+        not has_data, not has_data, show_toolbar, chart_type,
+    )
+
+
+# --- Chart type selector ---
+
+@callback(
+    Output("results-container", "children", allow_duplicate=True),
+    Output("current-chart-type", "data", allow_duplicate=True),
+    Input({"type": "chart-type-btn", "index": ALL}, "n_clicks"),
+    State("query-result", "data"),
+    prevent_initial_call=True,
+)
+def change_chart_type(n_clicks_list, query_data):
+    """Regenerate chart when user clicks a chart type button."""
+    if not any(n_clicks_list) or not query_data or not query_data.get("data"):
+        raise PreventUpdate
+
+    triggered = ctx.triggered_id
+    if not isinstance(triggered, dict):
+        raise PreventUpdate
+
+    idx = triggered["index"]
+    if idx < 0 or idx >= len(CHART_TYPE_LIST):
+        raise PreventUpdate
+
+    selected_type = CHART_TYPE_LIST[idx]
+    df = pd.DataFrame(query_data["data"])
+    if df.empty:
+        raise PreventUpdate
+
+    query_details = query_data.get("query_details")
+    results = _build_results_panel(df, selected_type, query_details)
+
+    return results, selected_type
 
 
 # --- Suggestion chips ---
@@ -456,16 +489,17 @@ def export_csv(n_clicks, query_data):
     return dcc.send_data_frame(df.to_csv, "consulta_resultado.csv", index=False)
 
 
-# --- Save Query ---
+# --- Save Query (with conversation history) ---
 
 @callback(
     Output("save-query-btn", "children"),
     Input("save-query-btn", "n_clicks"),
     State("query-result", "data"),
+    State("chat-history", "data"),
     State("tenant-context", "data"),
     prevent_initial_call=True,
 )
-def save_query(n_clicks, query_data, tenant):
+def save_query(n_clicks, query_data, chat_history, tenant):
     if not query_data or not query_data.get("data"):
         raise PreventUpdate
 
@@ -484,6 +518,7 @@ def save_query(n_clicks, query_data, tenant):
         ai_function=query_data.get("ai_function"),
         generated_sql=generated_sql,
         visualizations=[{"type": query_data.get("chart_type") or "table", "is_default": True}],
+        conversation_history=chat_history,
     )
 
     if result.get("success"):
@@ -491,11 +526,13 @@ def save_query(n_clicks, query_data, tenant):
     return [html.I(className="bi bi-bookmark me-1"), "Guardar"]
 
 
-# --- Re-run from URL ---
+# --- Re-run from URL (with conversation restoration) ---
 
 @callback(
     Output("chat-input", "value", allow_duplicate=True),
     Output("chat-send-btn", "n_clicks", allow_duplicate=True),
+    Output("chat-messages", "children", allow_duplicate=True),
+    Output("chat-history", "data", allow_duplicate=True),
     Input("query-url", "search"),
     State("chat-send-btn", "n_clicks"),
     State("tenant-context", "data"),
@@ -509,19 +546,43 @@ def rerun_from_url(search, current_n, tenant):
     import urllib.parse
     params = urllib.parse.parse_qs(search.lstrip("?"))
 
-    # ?rerun=<id> — re-execute a saved query
+    # ?rerun=<id> — re-execute a saved query, restore conversation if available
     rerun_id = params.get("rerun", [None])[0]
     if rerun_id:
         svc = StorageService(tenant_id=tenant or settings.DEFAULT_TENANT)
         query = svc.get_query(int(rerun_id))
         if not query:
             raise PreventUpdate
-        return query["query_text"], (current_n or 0) + 1
+
+        # Check if conversation history is saved
+        conv_history = query.get("conversation_history")
+        if conv_history and isinstance(conv_history, list) and len(conv_history) > 0:
+            # Restore full conversation
+            chat_elements = []
+            for msg in conv_history:
+                if msg.get("role") == "user":
+                    chat_elements.append(_render_user_message(msg["content"]))
+                else:
+                    chat_elements.append(_render_assistant_message(msg.get("content", "")))
+
+            # Add a separator indicating this is a restored conversation
+            chat_elements.append(html.Div([
+                html.Hr(className="my-2"),
+                html.Small([
+                    html.I(className="bi bi-clock-history me-1"),
+                    "Conversacion restaurada. Puedes continuar preguntando.",
+                ], className="text-muted", style={"fontSize": "11px"}),
+            ], className="text-center mb-2"))
+
+            return no_update, no_update, chat_elements, conv_history
+
+        # No conversation history — just re-run the query text
+        return query["query_text"], (current_n or 0) + 1, no_update, no_update
 
     # ?q=<text> — pre-fill a question and auto-execute
     question = params.get("q", [None])[0]
     if question:
-        return question, (current_n or 0) + 1
+        return question, (current_n or 0) + 1, no_update, no_update
 
     raise PreventUpdate
 
@@ -555,19 +616,25 @@ def load_recent_history(n_clicks, tenant):
 
     items = []
     for q in result["queries"]:
+        # Show conversation icon if it has saved history
+        has_conv = bool(q.get("conversation_history"))
         items.append(
             dbc.Card([
                 dbc.CardBody([
                     html.Div([
                         html.Small(q["name"][:60], className="fw-semibold",
                                    style={"fontSize": "12px"}),
-                        dbc.Button(
-                            html.I(className="bi bi-arrow-repeat"),
-                            href=f"/consultas/nueva?rerun={q['id']}",
-                            outline=True, color="primary", size="sm",
-                            className="ms-auto",
-                            style={"padding": "2px 6px"},
-                        ),
+                        html.Div([
+                            html.I(className="bi bi-chat-left-text text-primary me-2",
+                                   style={"fontSize": "10px"},
+                                   title="Tiene conversacion guardada") if has_conv else None,
+                            dbc.Button(
+                                html.I(className="bi bi-arrow-repeat"),
+                                href=f"/consultas/nueva?rerun={q['id']}",
+                                outline=True, color="primary", size="sm",
+                                style={"padding": "2px 6px"},
+                            ),
+                        ], className="d-flex align-items-center ms-auto"),
                     ], className="d-flex align-items-center"),
                 ], className="py-1 px-2"),
             ], className="mb-1", style={"borderRadius": "8px", "border": "1px solid #F0F0F5"})

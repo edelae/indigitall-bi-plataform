@@ -136,6 +136,20 @@ class SchemaService:
             for r in rows
         ]
 
+    def list_all_tables_with_columns(self) -> List[Dict[str, Any]]:
+        """List all allowed tables with their columns in a single call (for Redash-style sidebar)."""
+        tables = self.list_tables()
+        result = []
+        for t in tables:
+            cols = self.get_table_schema(t["table_name"])
+            result.append({
+                "table_name": t["table_name"],
+                "row_count": t["row_count"],
+                "size": t["size"],
+                "columns": cols,
+            })
+        return result
+
     def get_table_indexes(self, table_name: str) -> List[Dict[str, str]]:
         """Return indexes for a given table."""
         if table_name not in ALLOWED_TABLES:

@@ -46,7 +46,8 @@ class StorageService:
                    t.c.result_row_count, t.c.result_data, t.c.result_columns,
                    t.c.visualizations, t.c.generated_sql,
                    t.c.tags, t.c.is_favorite,
-                   t.c.created_by, t.c.created_at, t.c.updated_at)
+                   t.c.created_by, t.c.created_at, t.c.updated_at,
+                   t.c.conversation_history)
             .where(and_(*clauses))
             .order_by(t.c.updated_at.desc())
             .limit(limit)
@@ -93,6 +94,7 @@ class StorageService:
         visualizations: Optional[List[Dict]] = None,
         tags: Optional[List[str]] = None,
         created_by: Optional[str] = None,
+        conversation_history: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         t = SavedQuery.__table__
         now = datetime.utcnow()
@@ -113,6 +115,7 @@ class StorageService:
             "created_by": created_by,
             "created_at": now,
             "updated_at": now,
+            "conversation_history": conversation_history,
         }
 
         with engine.begin() as conn:

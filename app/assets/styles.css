@@ -488,6 +488,102 @@ html, body {
   cursor: not-allowed;
 }
 
+/* === Chart Type Toolbar === */
+.chart-type-btn {
+  border-radius: var(--id-radius-sm) !important;
+  font-size: 12px;
+  padding: 4px 10px;
+  transition: all 150ms ease-out;
+}
+
+.chart-type-btn:hover {
+  background: rgba(30, 136, 229, 0.08) !important;
+  border-color: var(--id-primary) !important;
+  color: var(--id-primary) !important;
+}
+
+.chart-type-btn.active,
+.chart-type-btn:active {
+  background: var(--id-primary) !important;
+  border-color: var(--id-primary) !important;
+  color: white !important;
+}
+
+/* === Source Panel (Redash-style) === */
+.source-sidebar {
+  max-height: calc(100vh - 350px);
+  overflow-y: auto;
+  border-right: 1px solid var(--id-border);
+  padding-right: 8px;
+}
+
+.source-sidebar-col {
+  border-right: 1px solid var(--id-border);
+}
+
+.source-sql-panel {
+  background: #1A1A2E;
+  color: #E4E4E7;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  padding: 12px 16px;
+  border-radius: var(--id-radius-sm);
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.source-table-tree .accordion-button {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+}
+
+.source-table-tree .accordion-button:not(.collapsed) {
+  color: var(--id-primary);
+  background: rgba(30, 136, 229, 0.04);
+}
+
+.source-table-tree .accordion-body {
+  padding: 0;
+}
+
+/* === Builder Grid Area === */
+.builder-grid-area {
+  border: 2px dashed var(--id-border);
+  border-radius: var(--id-radius-lg);
+  min-height: 400px;
+  transition: border-color 200ms ease-out;
+}
+
+.builder-grid-area:hover {
+  border-color: var(--id-primary-light);
+}
+
+/* === React Grid Layout (dash-draggable) === */
+.react-grid-placeholder {
+  background: var(--id-primary-light) !important;
+  opacity: 0.15 !important;
+  border-radius: var(--id-radius-lg) !important;
+}
+
+.react-resizable-handle::after {
+  border-right: 2px solid var(--id-text-muted) !important;
+  border-bottom: 2px solid var(--id-text-muted) !important;
+}
+
+.react-grid-item {
+  transition: all 200ms ease;
+}
+
+.react-grid-item.react-draggable-dragging {
+  z-index: 100;
+  box-shadow: var(--id-shadow-lg);
+}
+
 /* === Responsive === */
 @media (max-width: 1200px) {
   .query-page-row .chat-column { flex: 0 0 45%; max-width: 45%; }

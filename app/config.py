@@ -23,8 +23,9 @@ class Settings(BaseSettings):
     # Anthropic AI
     ANTHROPIC_API_KEY: str = ""
 
-    # OpenAI (fallback)
+    # OpenAI (primary for queries)
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o"
 
     # Sentry
     SENTRY_DSN: str = ""

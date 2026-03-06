@@ -1,6 +1,6 @@
 """
 AI Agent Service — Hybrid architecture: pre-built functions + guarded SQL fallback.
-Uses Anthropic Claude Sonnet for intent classification and SQL generation.
+Uses OpenAI GPT-4o with function calling (primary) and Anthropic Claude (fallback).
 Falls back to keyword matching (demo mode) when no API key is configured.
 """
 
@@ -60,6 +60,93 @@ SQL_BLOCKLIST = re.compile(
 MAX_SQL_ROWS = 1000
 SQL_TIMEOUT_MS = 10_000  # 10 seconds
 
+# --- OpenAI Function Calling Tools ---
+
+ANALYTICS_FUNCTIONS = [
+    "summary", "fallback_rate", "messages_by_direction", "messages_by_hour",
+    "messages_over_time", "messages_by_day_of_week", "top_contacts",
+    "intent_distribution", "agent_performance", "entity_comparison",
+    "high_messages_day", "high_messages_week", "high_messages_month",
+]
+
+OPENAI_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_analytics",
+            "description": (
+                "Execute a pre-built analytics function. Use this for common queries "
+                "like summaries, fallback rates, message trends, top contacts, agent performance, etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "function_name": {
+                        "type": "string",
+                        "enum": ANALYTICS_FUNCTIONS,
+                        "description": "The analytics function to execute.",
+                    },
+                    "explanation": {
+                        "type": "string",
+                        "description": "Business insight explanation in Spanish for the user.",
+                    },
+                },
+                "required": ["function_name", "explanation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_sql",
+            "description": (
+                "Generate and execute a custom SQL query for complex data analysis not covered "
+                "by pre-built functions. Only SELECT queries are allowed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The SQL SELECT query. Must include WHERE tenant_id = '{TENANT_ID}' and LIMIT.",
+                    },
+                    "chart_type": {
+                        "type": "string",
+                        "enum": ["bar", "line", "pie", "table", "histogram", "area"],
+                        "description": "Best visualization type for the results.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Chart title in Spanish.",
+                    },
+                    "explanation": {
+                        "type": "string",
+                        "description": "Business insight explanation in Spanish for the user.",
+                    },
+                },
+                "required": ["query", "chart_type", "title", "explanation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_clarification",
+            "description": "Ask the user for more information when the question is ambiguous.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The clarification question in Spanish.",
+                    },
+                },
+                "required": ["question"],
+            },
+        },
+    },
+]
+
 
 class AIAgent:
     """AI Agent for natural language query processing with pre-built analytics."""
@@ -69,7 +156,7 @@ class AIAgent:
         self.client = None
         self.openai_client = None
         self.model = "claude-sonnet-4-5-20250929"
-        self.openai_model = "gpt-4o-mini"
+        self.openai_model = settings.OPENAI_MODEL
 
         if ANTHROPIC_AVAILABLE and settings.has_ai_key:
             self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -93,70 +180,70 @@ class AIAgent:
         }
 
     # ------------------------------------------------------------------
-    # System prompt
+    # System prompts
     # ------------------------------------------------------------------
 
     def _get_system_prompt(self) -> str:
         schema_desc = self.data_service.get_schema_description()
-        return f"""Eres un analista de datos senior especializado en WhatsApp Business y campañas de comunicación. Trabajas en una plataforma de analytics con asistente de IA.
+        return f"""Eres un analista de datos senior especializado en WhatsApp Business y campanas de comunicacion. Trabajas en una plataforma de analytics con asistente de IA.
 
 === TU PERSONALIDAD ===
 - Profesional, amigable y proactivo
 - Das insights de negocio, no solo datos
-- Respondes en español naturalmente
-- Cuando muestras datos, SIEMPRE agregas interpretación
+- Respondes en espanol naturalmente
+- Cuando muestras datos, SIEMPRE agregas interpretacion
 
 {schema_desc}
 
-=== CLASIFICACIÓN ===
-Clasifica cada mensaje en UNA de estas categorías:
+=== CLASIFICACION ===
+Clasifica cada mensaje en UNA de estas categorias:
 
 1. CONVERSATION — Saludos, despedidas, agradecimientos, preguntas sobre ti
-2. ANALYTICS — Preguntas sobre datos que requieren una función de análisis
+2. ANALYTICS — Preguntas sobre datos que requieren una funcion de analisis
 3. SQL — Preguntas complejas que NO cubren las funciones pre-built
-4. CLARIFICATION — Cuando la pregunta es ambigua o necesitas más información
+4. CLARIFICATION — Cuando la pregunta es ambigua o necesitas mas informacion
 
 === FORMATO DE RESPUESTA ===
-SIEMPRE responde con JSON válido. Sin texto fuera del JSON.
+SIEMPRE responde con JSON valido. Sin texto fuera del JSON.
 
 Para CONVERSATION:
 {{"type": "conversation", "response": "Tu respuesta amigable"}}
 
 Para ANALYTICS (funciones pre-built):
-{{"type": "analytics", "function": "NOMBRE_DE_FUNCION", "explanation": "Explicación con insight de negocio"}}
+{{"type": "analytics", "function": "NOMBRE_DE_FUNCION", "explanation": "Explicacion con insight de negocio"}}
 
 Para SQL (consultas ad-hoc):
-{{"type": "sql", "query": "SELECT ... FROM ... WHERE tenant_id = '{{TENANT_ID}}' ...", "chart_type": "bar|line|pie|table|histogram|area", "title": "Título de la gráfica", "explanation": "Qué muestra esta consulta"}}
+{{"type": "sql", "query": "SELECT ... FROM ... WHERE tenant_id = '{{TENANT_ID}}' ...", "chart_type": "bar|line|pie|table|histogram|area", "title": "Titulo de la grafica", "explanation": "Que muestra esta consulta"}}
 
-Para CLARIFICATION (cuando necesitas más info):
-{{"type": "clarification", "response": "Tu pregunta específica para el usuario"}}
+Para CLARIFICATION (cuando necesitas mas info):
+{{"type": "clarification", "response": "Tu pregunta especifica para el usuario"}}
 
-=== SELECCIÓN DE TIPO DE GRÁFICA (chart_type) ===
-Cuando devuelvas tipo "sql", SIEMPRE incluye chart_type con el tipo más adecuado:
+=== SELECCION DE TIPO DE GRAFICA (chart_type) ===
+Cuando devuelvas tipo "sql", SIEMPRE incluye chart_type con el tipo mas adecuado:
 - "line" — datos temporales/tendencias (fecha en eje X)
-- "bar" — comparación entre categorías discretas
-- "pie" — proporciones/distribuciones (máximo 8 categorías)
+- "bar" — comparacion entre categorias discretas
+- "pie" — proporciones/distribuciones (maximo 8 categorias)
 - "table" — datos tabulares detallados, KPIs, o muchas columnas
-- "histogram" — distribución de valores numéricos continuos
+- "histogram" — distribucion de valores numericos continuos
 - "area" — tendencias acumuladas o series de tiempo con volumen
-Si el usuario pide explícitamente un tipo de gráfica, RESPETA su elección siempre.
+Si el usuario pide explicitamente un tipo de grafica, RESPETA su eleccion siempre.
 
 === FUNCIONES DISPONIBLES ===
 IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 
 1. "summary" — Resumen ejecutivo con KPIs principales
 2. "fallback_rate" — Tasa de fallback del bot
-3. "messages_by_direction" — Distribución Inbound/Bot/Agent
-4. "messages_by_hour" — Volumen por hora del día
+3. "messages_by_direction" — Distribucion Inbound/Bot/Agent
+4. "messages_by_hour" — Volumen por hora del dia
 5. "messages_over_time" — Tendencia diaria
-6. "messages_by_day_of_week" — Volumen por día de semana
-7. "top_contacts" — Top 10 contactos más activos
-8. "intent_distribution" — Intenciones más comunes
+6. "messages_by_day_of_week" — Volumen por dia de semana
+7. "top_contacts" — Top 10 contactos mas activos
+8. "intent_distribution" — Intenciones mas comunes
 9. "agent_performance" — Rendimiento de agentes humanos
-10. "entity_comparison" — Comparación entre entidades/cooperativas
-11. "high_messages_day" — Clientes con más de 4 mensajes en un día
-12. "high_messages_week" — Clientes con más de 4 mensajes en una semana
-13. "high_messages_month" — Clientes con más de 4 mensajes en un mes
+10. "entity_comparison" — Comparacion entre entidades/cooperativas
+11. "high_messages_day" — Clientes con mas de 4 mensajes en un dia
+12. "high_messages_week" — Clientes con mas de 4 mensajes en una semana
+13. "high_messages_month" — Clientes con mas de 4 mensajes en un mes
 
 === REGLAS PARA SQL ===
 - Solo SELECT (no INSERT, UPDATE, DELETE, DROP, etc.)
@@ -164,18 +251,52 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 - Tablas analytics (esquema public_analytics): public_analytics.fact_message_events, public_analytics.dim_date, public_analytics.dim_time, public_analytics.dim_channel, public_analytics.dim_event_type, public_analytics.dim_contact, public_analytics.dim_agent, public_analytics.dim_campaign, public_analytics.dim_conversation
 - SIEMPRE usar prefijo public_analytics. para tablas del star schema
 - SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}'
-- SIEMPRE incluir LIMIT (máximo 1000)
+- SIEMPRE incluir LIMIT (maximo 1000)
 - Usa aggregate functions cuando sea posible
 - Prefiere funciones pre-built antes de SQL
-- Nombra las columnas con alias legibles en español cuando sea posible (ej: AS "Fecha", AS "Total Mensajes")
+- Nombra las columnas con alias legibles en espanol cuando sea posible (ej: AS "Fecha", AS "Total Mensajes")
 
 === REGLAS GENERALES ===
-1. Si la pregunta encaja en una función pre-built, úsala (tipo "analytics")
+1. Si la pregunta encaja en una funcion pre-built, usala (tipo "analytics")
 2. Solo usa "sql" para preguntas que NO cubren las funciones pre-built
-3. Si no estás seguro qué función usar, usa "summary"
+3. Si no estas seguro que funcion usar, usa "summary"
 4. SIEMPRE agrega un insight de negocio en explanation
-5. Responde en español, profesional pero accesible
-6. Si la pregunta es ambigua o le falta contexto, usa "clarification" para pedir más información antes de ejecutar
+5. Responde en espanol, profesional pero accesible
+6. Si la pregunta es ambigua o le falta contexto, usa "clarification" para pedir mas informacion antes de ejecutar
+"""
+
+    def _get_system_prompt_openai(self) -> str:
+        """Simplified system prompt for OpenAI function calling."""
+        schema_desc = self.data_service.get_schema_description()
+        return f"""Eres un analista de datos senior especializado en WhatsApp Business y campanas de comunicacion omnicanal.
+Trabajas para VISIONAMOS, una red de cooperativas financieras en Colombia.
+
+=== PERSONALIDAD ===
+- Profesional, amigable y proactivo
+- Das insights de negocio, no solo datos
+- Respondes en espanol colombiano naturalmente
+- Cuando describes datos, SIEMPRE incluyes interpretacion de negocio
+
+{schema_desc}
+
+=== CONTEXTO DE NEGOCIO ===
+- Cliente: VISIONAMOS (red de cooperativas financieras)
+- Canal principal: WhatsApp (bot + contact center humano)
+- Datos: mensajes, conversaciones, contactos, agentes, estadisticas diarias
+- Periodo: datos historicos de 3 meses
+
+=== INSTRUCCIONES ===
+- Para preguntas conversacionales (saludos, ayuda), responde directamente sin herramientas
+- Para analisis de datos, usa execute_analytics si hay una funcion pre-built que aplique
+- Para consultas complejas no cubiertas, usa execute_sql con SQL seguro (solo SELECT)
+- Si la pregunta es ambigua, usa ask_clarification
+- Prefiere funciones pre-built sobre SQL ad-hoc cuando sea posible
+- En SQL: SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}' y LIMIT
+
+=== REGLAS SQL ===
+- Solo SELECT. Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap
+- Tablas analytics: public_analytics.fact_message_events, public_analytics.dim_date, etc.
+- Alias legibles en espanol (AS "Fecha", AS "Total Mensajes")
 """
 
     # ------------------------------------------------------------------
@@ -207,13 +328,13 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
         # Pre-check for "high messages" queries (deterministic, no LLM needed)
         question_lower = user_question.lower()
         high_msg_indicators = [
-            "mas de 4", "más de 4", "recibieron mas de",
-            "recibieron más de", "mayor a 4", "superiores a 4",
+            "mas de 4", "mas de 4", "recibieron mas de",
+            "recibieron mas de", "mayor a 4", "superiores a 4",
         ]
         if any(ind in question_lower for ind in high_msg_indicators):
             return self._handle_high_messages(question_lower, tenant_filter)
 
-        # OpenAI GPT-4o-mini (preferred — always available)
+        # OpenAI GPT-4o with function calling (primary)
         if self.openai_client is not None:
             result = self._openai_query(user_question, conversation_history, tenant_filter)
             if result is not None:
@@ -243,7 +364,7 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
             # Build conversation messages
             messages = []
             if conversation_history:
-                for msg in conversation_history[-4:]:
+                for msg in conversation_history[-8:]:
                     if msg.get("role") in ("user", "assistant"):
                         messages.append({
                             "role": msg["role"],
@@ -348,7 +469,7 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
             return None
 
     # ------------------------------------------------------------------
-    # OpenAI fallback (GPT-4o-mini)
+    # OpenAI with function calling (GPT-4o)
     # ------------------------------------------------------------------
 
     def _openai_query(
@@ -357,11 +478,11 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
         conversation_history: List[Dict] = None,
         tenant_filter: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Process query via OpenAI GPT-4o-mini as fallback."""
+        """Process query via OpenAI GPT-4o with native function calling."""
         try:
-            messages = [{"role": "system", "content": self._get_system_prompt()}]
+            messages = [{"role": "system", "content": self._get_system_prompt_openai()}]
             if conversation_history:
-                for msg in conversation_history[-4:]:
+                for msg in conversation_history[-8:]:
                     if msg.get("role") in ("user", "assistant"):
                         messages.append({
                             "role": msg["role"],
@@ -374,61 +495,26 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                 messages=messages,
                 max_tokens=1024,
                 temperature=0.3,
+                tools=OPENAI_TOOLS,
+                tool_choice="auto",
             )
 
-            response_text = response.choices[0].message.content
+            choice = response.choices[0]
+            message = choice.message
 
-            try:
-                response_json = json.loads(response_text)
-            except json.JSONDecodeError:
-                json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-                if json_match:
-                    response_json = json.loads(json_match.group())
-                else:
-                    return None
+            # If the model responds with tool calls, process them
+            if message.tool_calls:
+                return self._handle_tool_calls(message.tool_calls, tenant_filter)
 
-            resp_type = response_json.get("type", "conversation")
-
-            if resp_type == "conversation":
+            # If the model responds with plain text (conversation/greeting)
+            if message.content:
                 return {
                     "type": "conversation",
-                    "response": response_json.get("response", ""),
+                    "response": message.content,
                     "data": None,
                     "chart_type": None,
                     "query_details": None,
                 }
-
-            if resp_type == "clarification":
-                return {
-                    "type": "conversation",
-                    "response": response_json.get("response", ""),
-                    "data": None,
-                    "chart_type": None,
-                    "query_details": None,
-                }
-
-            if resp_type == "analytics":
-                function_name = response_json.get("function", "summary")
-                explanation = response_json.get("explanation", "")
-                result = self._execute_function(function_name, tenant_filter)
-                row_count = len(result["data"]) if result["data"] is not None and not result["data"].empty else 0
-                return {
-                    "type": "analytics",
-                    "response": explanation,
-                    "data": result["data"],
-                    "chart_type": result["chart_type"],
-                    "query_details": {"function": function_name, "rows_returned": row_count},
-                }
-
-            if resp_type == "sql":
-                raw_sql = response_json.get("query", "")
-                explanation = response_json.get("explanation", "")
-                ai_chart = response_json.get("chart_type")
-                ai_title = response_json.get("title")
-                return self._execute_guarded_sql(
-                    raw_sql, explanation, tenant_filter,
-                    chart_type=ai_chart, title=ai_title,
-                )
 
             return None
 
@@ -457,8 +543,58 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                 "Por favor intenta de nuevo."
             )
 
+    def _handle_tool_calls(
+        self,
+        tool_calls,
+        tenant_filter: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Process OpenAI function calling tool_calls."""
+        # Process the first tool call (we only expect one per turn)
+        tool_call = tool_calls[0]
+        func_name = tool_call.function.name
+        try:
+            args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse tool call arguments: %s", tool_call.function.arguments)
+            return None
+
+        if func_name == "execute_analytics":
+            function_name = args.get("function_name", "summary")
+            explanation = args.get("explanation", "")
+            result = self._execute_function(function_name, tenant_filter)
+            row_count = len(result["data"]) if result["data"] is not None and not result["data"].empty else 0
+            return {
+                "type": "analytics",
+                "response": explanation,
+                "data": result["data"],
+                "chart_type": result["chart_type"],
+                "query_details": {"function": function_name, "rows_returned": row_count},
+            }
+
+        if func_name == "execute_sql":
+            raw_sql = args.get("query", "")
+            explanation = args.get("explanation", "")
+            chart_type = args.get("chart_type")
+            title = args.get("title")
+            return self._execute_guarded_sql(
+                raw_sql, explanation, tenant_filter,
+                chart_type=chart_type, title=title,
+            )
+
+        if func_name == "ask_clarification":
+            question = args.get("question", "")
+            return {
+                "type": "conversation",
+                "response": question,
+                "data": None,
+                "chart_type": None,
+                "query_details": None,
+            }
+
+        return None
+
     # ------------------------------------------------------------------
-    # Guarded SQL execution (Task 4.2)
+    # Guarded SQL execution
     # ------------------------------------------------------------------
 
     def _execute_guarded_sql(
@@ -482,7 +618,6 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
             return self._sql_error("La consulta contiene operaciones no permitidas.")
 
         # 3. Only allowed tables
-        # Extract table names from FROM and JOIN clauses (supports schema.table)
         table_pattern = re.compile(
             r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_.]*)", re.IGNORECASE
         )
@@ -498,7 +633,6 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
         tenant = tenant_filter or settings.DEFAULT_TENANT
         sql = sql.replace("{TENANT_ID}", tenant)
         if "tenant_id" not in sql.lower():
-            # Inject WHERE tenant_id clause
             if " WHERE " in sql.upper():
                 sql = re.sub(
                     r"(?i)\bWHERE\b",
@@ -507,7 +641,6 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                     count=1,
                 )
             else:
-                # Find FROM clause and add WHERE after table name (supports schema.table)
                 sql = re.sub(
                     r"(?i)(FROM\s+[a-zA-Z_][a-zA-Z0-9_.]*)",
                     rf"\1 WHERE tenant_id = '{tenant}'",
@@ -526,7 +659,6 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                 df = pd.read_sql(text(sql), conn)
 
             row_count = len(df)
-            # Use AI-suggested chart type, or auto-detect from data
             resolved_chart = chart_type or self._auto_detect_chart_type(df)
             return {
                 "type": "analytics",
@@ -553,13 +685,10 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
         x_col = df.columns[0]
         x_lower = x_col.lower()
         n_rows = len(df)
-        # Temporal data → line
         if any(kw in x_lower for kw in ["date", "fecha", "time", "dia", "mes", "month", "week"]):
             return "line"
-        # Few categories → pie
         if n_rows <= 6 and len(df.columns) == 2:
             return "pie"
-        # Many columns or many rows → table
         if len(df.columns) > 4 or n_rows > 50:
             return "table"
         return "bar"
@@ -652,12 +781,12 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
     # ------------------------------------------------------------------
 
     def _handle_high_messages(self, question_lower: str, tenant_filter: Optional[str]) -> Dict[str, Any]:
-        if any(p in question_lower for p in ["semana", "semanal", "weekly", "7 dias", "7 días"]):
+        if any(p in question_lower for p in ["semana", "semanal", "weekly", "7 dias", "7 dias"]):
             func_name, period_text = "high_messages_week", "por semana"
-        elif any(p in question_lower for p in ["mes", "mensual", "monthly", "30 dias", "30 días"]):
+        elif any(p in question_lower for p in ["mes", "mensual", "monthly", "30 dias", "30 dias"]):
             func_name, period_text = "high_messages_month", "por mes"
         else:
-            func_name, period_text = "high_messages_day", "por día"
+            func_name, period_text = "high_messages_day", "por dia"
 
         result = self._execute_function(func_name, tenant_filter)
         count = len(result["data"]) if result["data"] is not None and not result["data"].empty else 0
@@ -665,8 +794,8 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
         return {
             "type": "analytics",
             "response": (
-                f"Encontré {count:,} registros de clientes que recibieron más de 4 mensajes "
-                f"{period_text}. Estos clientes pueden requerir atención especial."
+                f"Encontre {count:,} registros de clientes que recibieron mas de 4 mensajes "
+                f"{period_text}. Estos clientes pueden requerir atencion especial."
             ),
             "data": result["data"],
             "chart_type": result["chart_type"],
@@ -681,46 +810,42 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
         """Pattern match without API — used when no Anthropic key is configured."""
         q = question.lower().strip()
 
-        # Greetings
         greetings = ["hola", "hello", "hi", "buenos dias", "buenas tardes", "buenas noches", "hey", "que tal"]
         if any(q.startswith(g) or q == g for g in greetings):
             return {
                 "type": "conversation",
                 "response": (
-                    "¡Hola! Soy tu asistente de analítica. Puedo ayudarte a:\n\n"
+                    "Hola! Soy tu asistente de analitica. Puedo ayudarte a:\n\n"
                     "- Ver el rendimiento del bot (fallback)\n"
                     "- Analizar horarios pico\n"
                     "- Revisar agentes y contactos\n"
                     "- Comparar entidades\n\n"
-                    "¿Qué te gustaría analizar?"
+                    "Que te gustaria analizar?"
                 ),
                 "data": None, "chart_type": None, "query_details": None,
             }
 
-        # Thanks
         if any(t in q for t in ["gracias", "thanks", "thank you"]):
             return {
                 "type": "conversation",
-                "response": "¡Con gusto! Si necesitas más análisis, aquí estoy.",
+                "response": "Con gusto! Si necesitas mas analisis, aqui estoy.",
                 "data": None, "chart_type": None, "query_details": None,
             }
 
-        # Goodbye
         if any(g in q for g in ["adios", "bye", "chao", "hasta luego"]):
             return {
                 "type": "conversation",
-                "response": "¡Hasta luego! Vuelve cuando necesites revisar las métricas.",
+                "response": "Hasta luego! Vuelve cuando necesites revisar las metricas.",
                 "data": None, "chart_type": None, "query_details": None,
             }
 
-        # Help
         if any(h in q for h in ["ayuda", "help", "que puedes", "que haces"]):
             return {
                 "type": "conversation",
                 "response": (
                     "Puedo ayudarte con:\n\n"
-                    "- **Bot:** \"¿Cómo está el fallback?\"\n"
-                    "- **Horarios:** \"¿Cuál es el horario pico?\"\n"
+                    "- **Bot:** \"Como esta el fallback?\"\n"
+                    "- **Horarios:** \"Cual es el horario pico?\"\n"
                     "- **Agentes:** \"Rendimiento de agentes\"\n"
                     "- **Contactos:** \"Top 10 contactos\"\n"
                     "- **Tendencias:** \"Muestra la tendencia\"\n"
@@ -730,8 +855,6 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                 "data": None, "chart_type": None, "query_details": None,
             }
 
-        # Keyword → (function, friendly explanation)
-        # Order matters: more specific patterns first to avoid false matches
         patterns = [
             (["fallback", "fallo", "entiende", "calidad bot"], "fallback_rate",
              "Aqui tienes la tasa de fallback del bot. Un valor menor a 15% es saludable."),
@@ -776,7 +899,6 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                     "query_details": {"function": func_name, "rows_returned": row_count},
                 }
 
-        # Default help
         return {
             "type": "conversation",
             "response": (
@@ -787,7 +909,7 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                 "- Tendencia de mensajes\n"
                 "- Top contactos\n"
                 "- Rendimiento de agentes\n"
-                "- Comparación de entidades"
+                "- Comparacion de entidades"
             ),
             "data": None, "chart_type": None, "query_details": None,
         }
@@ -800,12 +922,12 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
     def get_suggested_questions() -> List[str]:
         return [
             "Dame un resumen general de los datos",
-            "¿Cuál es la tasa de fallback?",
-            "Mensajes por hora del día",
-            "Top 10 contactos más activos",
+            "Cual es la tasa de fallback?",
+            "Mensajes por hora del dia",
+            "Top 10 contactos mas activos",
             "Rendimiento de agentes",
-            "Comparación entre entidades",
-            "Distribución de intenciones",
-            "Mensajes por día de la semana",
+            "Comparacion entre entidades",
+            "Distribucion de intenciones",
+            "Mensajes por dia de la semana",
             "Tendencia de mensajes en el tiempo",
         ]

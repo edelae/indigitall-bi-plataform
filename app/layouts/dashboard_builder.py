@@ -1,8 +1,9 @@
-"""Dashboard Builder — Create custom dashboards from saved queries."""
+"""Dashboard Builder — Create custom dashboards from saved queries with drag-and-drop grid."""
 
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+import dash_draggable
 
 dash.register_page(__name__, path="/tableros/nuevo", name="Nuevo Tablero", order=38)
 
@@ -76,18 +77,22 @@ layout = dbc.Container([
             "overflowY": "auto",
         }),
 
-        # Right canvas: widget grid (md=9)
+        # Right canvas: draggable widget grid (md=9)
         dbc.Col([
-            html.Div(id="builder-canvas", children=[
-                html.Div([
-                    html.I(className="bi bi-grid-1x2 display-4 text-muted"),
-                    html.P("Agrega consultas desde el panel lateral para crear widgets.",
-                           className="text-muted mt-3"),
-                    html.P("Tambien puedes usar el asistente IA para sugerencias.",
-                           className="text-muted", style={"fontSize": "13px"}),
-                ], className="text-center py-5",
-                   id="builder-empty-state"),
-            ]),
+            html.Div(
+                id="builder-canvas",
+                className="builder-grid-area",
+                children=[
+                    html.Div([
+                        html.I(className="bi bi-grid-1x2 display-4 text-muted"),
+                        html.P("Agrega consultas desde el panel lateral para crear widgets.",
+                               className="text-muted mt-3"),
+                        html.P("Arrastra y redimensiona los widgets libremente.",
+                               className="text-muted", style={"fontSize": "13px"}),
+                    ], className="text-center py-5",
+                       id="builder-empty-state"),
+                ],
+            ),
         ], md=9, style={"paddingLeft": "24px"}),
     ], className="g-0"),
 

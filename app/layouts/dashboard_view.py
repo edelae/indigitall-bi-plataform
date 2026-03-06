@@ -1,4 +1,4 @@
-"""Dashboard view page — Widget grid display with info modals."""
+"""Dashboard view page — Widget grid display with drag-and-drop (view-only) and info modals."""
 
 import dash
 from dash import html, dcc
@@ -44,7 +44,7 @@ def layout(dashboard_id=None, **kwargs):
         # Cross-filter badge
         html.Div(id="dv-filter-badge"),
 
-        # Widget grid
+        # Widget grid (rendered dynamically)
         html.Div(id="dashboard-grid", className="dashboard-grid"),
 
         # Info modal

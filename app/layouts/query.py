@@ -1,4 +1,4 @@
-"""Query page — AI chat (left) + Results (right) + re-run support."""
+"""Query page — AI chat (left) + Results (right) + chart type selector + Redash-style source panel."""
 
 import dash
 from dash import html, dcc
@@ -19,9 +19,22 @@ SUGGESTIONS = [
     "Tendencia de mensajes en el tiempo",
 ]
 
+# Chart type options for the toolbar
+CHART_TYPES = [
+    {"type": "bar", "icon": "bi-bar-chart", "label": "Barras"},
+    {"type": "line", "icon": "bi-graph-up", "label": "Linea"},
+    {"type": "pie", "icon": "bi-pie-chart", "label": "Torta"},
+    {"type": "area", "icon": "bi-graph-down", "label": "Area"},
+    {"type": "histogram", "icon": "bi-bar-chart-steps", "label": "Histograma"},
+    {"type": "table", "icon": "bi-table", "label": "Tabla"},
+]
+
 layout = dbc.Container([
     # URL location for re-run support
     dcc.Location(id="query-url", refresh=False),
+
+    # Store for current chart type selection
+    dcc.Store(id="current-chart-type", data=None),
 
     dbc.Row([
         # Left panel: AI Chat (35%)
@@ -104,6 +117,22 @@ layout = dbc.Container([
                                    id="save-query-btn", disabled=True),
                     ]),
                 ], className="d-flex justify-content-between align-items-center mb-3"),
+
+                # Chart type selector toolbar (hidden until there are results)
+                html.Div(
+                    dbc.ButtonGroup([
+                        dbc.Button(
+                            [html.I(className=f"bi {ct['icon']} me-1"), ct["label"]],
+                            id={"type": "chart-type-btn", "index": i},
+                            outline=True, color="secondary", size="sm",
+                            className="chart-type-btn",
+                        )
+                        for i, ct in enumerate(CHART_TYPES)
+                    ], size="sm"),
+                    id="chart-type-toolbar",
+                    className="mb-3",
+                    style={"display": "none"},
+                ),
 
                 # Tabs: Resultado + Fuente de Datos
                 dbc.Tabs([
