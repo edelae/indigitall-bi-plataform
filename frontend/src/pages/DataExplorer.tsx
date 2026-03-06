@@ -26,7 +26,7 @@ export default function DataExplorer() {
   const [tables, setTables] = useState<TableInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
-  const [previewData, setPreviewData] = useState<{ columns: string[]; data: Record<string, any>[] } | null>(null)
+  const [previewData, setPreviewData] = useState<{ columns: string[]; data: Record<string, any>[]; total: number } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
   useEffect(() => {

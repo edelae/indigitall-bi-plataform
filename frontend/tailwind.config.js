@@ -6,6 +6,8 @@ export default {
       colors: {
         primary: { DEFAULT: '#1E88E5', dark: '#1565C0', light: '#42A5F5' },
         secondary: { DEFAULT: '#76C043', dark: '#5EA832' },
+        warning: '#FFC107',
+        error: '#EF4444',
         accent: { purple: '#9C27B0', orange: '#FF5722' },
         surface: '#F5F7FA',
         border: '#E4E4E7',
