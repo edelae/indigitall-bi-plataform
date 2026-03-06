@@ -128,7 +128,6 @@ services:
     ports:
       - "8050:8050"
     volumes:
-      - ./app:/app/app  # Hot-reload in dev
       - ./scripts:/app/scripts  # Extraction scripts
     restart: unless-stopped
     networks:

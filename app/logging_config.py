@@ -34,8 +34,8 @@ class JSONFormatter(logging.Formatter):
             user = getattr(g, "user", None)
             if user and isinstance(user, dict):
                 log_entry["user_id"] = user.get("id")
-        except RuntimeError:
-            pass  # Outside request context
+        except (RuntimeError, ImportError):
+            pass  # Outside request context or Flask not installed
 
         # Add extra fields
         if hasattr(record, "extra_data") and record.extra_data:
@@ -81,6 +81,6 @@ def setup_logging(level: str = "INFO"):
     root.addHandler(handler)
 
     # Quiet down noisy libraries
-    logging.getLogger("werkzeug").setLevel(logging.WARNING)
-    logging.getLogger("dash").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

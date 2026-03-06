@@ -13,5 +13,8 @@ dbt/target
 dbt/logs
 dbt/dbt_packages
 node_modules
+frontend/dist
+frontend/node_modules
+.claude
 *.md
 docs/

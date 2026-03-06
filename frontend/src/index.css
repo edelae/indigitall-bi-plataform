@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply text-text-dark;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-btn font-medium
+           hover:bg-primary-dark transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-text-dark border border-border px-4 py-2 rounded-btn font-medium
+           hover:bg-surface transition-colors duration-150;
+  }
+
+  .btn-danger {
+    @apply bg-red-500 text-white px-4 py-2 rounded-btn font-medium
+           hover:bg-red-600 transition-colors duration-150;
+  }
+
+  .btn-ghost {
+    @apply text-text-muted px-3 py-2 rounded-btn font-medium
+           hover:bg-surface transition-colors duration-150;
+  }
+
+  .btn-icon {
+    @apply p-2 rounded-btn text-text-muted hover:bg-surface
+           transition-colors duration-150;
+  }
+
+  .card {
+    @apply bg-white rounded-card shadow-card border border-border-light;
+  }
+
+  .input {
+    @apply w-full px-3 py-2 border border-border rounded-btn text-sm
+           focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary
+           placeholder:text-text-light transition-colors;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium;
+  }
+
+  .badge-primary { @apply bg-primary/10 text-primary; }
+  .badge-success { @apply bg-secondary/10 text-secondary; }
+  .badge-warning { @apply bg-warning/10 text-yellow-700; }
+  .badge-info { @apply bg-primary-light/10 text-primary; }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #E4E4E7; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #A0A3BD; }
+
+/* React Grid Layout */
+.react-grid-layout {
+  position: relative;
+}
+.react-grid-item.react-grid-placeholder {
+  background: #1E88E5 !important;
+  opacity: 0.1 !important;
+  border-radius: 16px !important;
+}
+.react-resizable-handle::after {
+  border-right: 2px solid #A0A3BD !important;
+  border-bottom: 2px solid #A0A3BD !important;
+}
+.react-grid-item > .react-resizable-handle {
+  z-index: 10;
+}
+
+/* Animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out forwards;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
