@@ -80,6 +80,8 @@ export interface DashboardWidget {
   custom_x_label?: string
   custom_y_label?: string
   show_legend?: boolean
+  // Text sizing
+  text_size?: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl'
   // Tab assignment
   tab_id?: string
   tab_name?: string
@@ -223,6 +225,78 @@ export const GRID_TEMPLATES: GridTemplate[] = [
       { x: 6, y: 0, w: 6, h: 4 },
       { x: 0, y: 4, w: 6, h: 4 },
       { x: 6, y: 4, w: 6, h: 4 },
+    ],
+  },
+  {
+    id: 'four-cols',
+    name: '4 Columnas',
+    description: 'Cuatro columnas iguales',
+    zones: [
+      { x: 0, y: 0, w: 3, h: 4 },
+      { x: 3, y: 0, w: 3, h: 4 },
+      { x: 6, y: 0, w: 3, h: 4 },
+      { x: 9, y: 0, w: 3, h: 4 },
+    ],
+  },
+  {
+    id: 'big-left-small-right',
+    name: 'Grande + 2 Pequenas',
+    description: 'Una grande y dos apiladas a la derecha',
+    zones: [
+      { x: 0, y: 0, w: 8, h: 6 },
+      { x: 8, y: 0, w: 4, h: 3 },
+      { x: 8, y: 3, w: 4, h: 3 },
+    ],
+  },
+  {
+    id: 'six-grid',
+    name: '6 Celdas',
+    description: 'Tres columnas, dos filas',
+    zones: [
+      { x: 0, y: 0, w: 4, h: 3 },
+      { x: 4, y: 0, w: 4, h: 3 },
+      { x: 8, y: 0, w: 4, h: 3 },
+      { x: 0, y: 3, w: 4, h: 3 },
+      { x: 4, y: 3, w: 4, h: 3 },
+      { x: 8, y: 3, w: 4, h: 3 },
+    ],
+  },
+  {
+    id: 'kpi-6-chart-3',
+    name: '6 KPIs + 3 Graficas',
+    description: 'KPIs arriba, tres graficas abajo',
+    zones: [
+      { x: 0, y: 0, w: 2, h: 2 },
+      { x: 2, y: 0, w: 2, h: 2 },
+      { x: 4, y: 0, w: 2, h: 2 },
+      { x: 6, y: 0, w: 2, h: 2 },
+      { x: 8, y: 0, w: 2, h: 2 },
+      { x: 10, y: 0, w: 2, h: 2 },
+      { x: 0, y: 2, w: 4, h: 4 },
+      { x: 4, y: 2, w: 4, h: 4 },
+      { x: 8, y: 2, w: 4, h: 4 },
+    ],
+  },
+  {
+    id: 'wide-narrow',
+    name: 'Ancho + Angosto',
+    description: 'Columna ancha izquierda, angosta derecha',
+    zones: [
+      { x: 0, y: 0, w: 9, h: 4 },
+      { x: 9, y: 0, w: 3, h: 2 },
+      { x: 9, y: 2, w: 3, h: 2 },
+    ],
+  },
+  {
+    id: 'mosaic',
+    name: 'Mosaico',
+    description: 'Tamanos variados tipo mosaico',
+    zones: [
+      { x: 0, y: 0, w: 4, h: 4 },
+      { x: 4, y: 0, w: 8, h: 2 },
+      { x: 4, y: 2, w: 4, h: 2 },
+      { x: 8, y: 2, w: 4, h: 4 },
+      { x: 0, y: 4, w: 8, h: 3 },
     ],
   },
 ]

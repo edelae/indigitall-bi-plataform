@@ -21,6 +21,24 @@ import 'react-resizable/css/styles.css'
 
 const ResponsiveGridLayout = WidthProvider(Responsive)
 
+const TEXT_SIZE_CLASS: Record<string, string> = {
+  xs: 'text-xs',
+  sm: 'text-sm',
+  base: 'text-base',
+  lg: 'text-lg',
+  xl: 'text-xl',
+  '2xl': 'text-2xl',
+}
+
+const TEXT_SIZE_OPTIONS = [
+  { value: 'xs', label: 'Muy pequeno' },
+  { value: 'sm', label: 'Pequeno' },
+  { value: 'base', label: 'Normal' },
+  { value: 'lg', label: 'Grande' },
+  { value: 'xl', label: 'Muy grande' },
+  { value: '2xl', label: 'Extra grande' },
+]
+
 // ─── Tab / Section Types ───────────────────────────────────────────
 interface DashboardTab {
   id: string
@@ -322,8 +340,8 @@ export default function DashboardBuilder() {
     y: w.grid_y,
     w: w.grid_w,
     h: w.grid_h,
-    minW: 2,
-    minH: 2,
+    minW: 1,
+    minH: 1,
   }))
 
   const filteredQueries = querySearch
@@ -562,7 +580,7 @@ export default function DashboardBuilder() {
                         >
                           <Pencil size={10} className="text-[#9CA3AF]" />
                         </button>
-                        {w.data?.length > 0 && !w.is_title_block && w.type !== 'text_card' && (
+                        {(w.data?.length > 0 || w.is_title_block || w.type === 'text_card') && (
                           <button
                             onMouseDown={e => { e.stopPropagation(); setSettingsOpen(settingsOpen === w.grid_i ? null : w.grid_i) }}
                             className="p-1 rounded hover:bg-gray-100 transition-colors" title="Configuracion"
@@ -588,38 +606,63 @@ export default function DashboardBuilder() {
                         {settingsOpen === w.grid_i && (
                           <div className="no-drag absolute top-7 right-0 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-30 p-2 min-w-[180px]"
                             onMouseDown={e => e.stopPropagation()}>
-                            <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Paleta</p>
-                            {Object.entries(COLOR_PALETTES).map(([key, pal]) => (
-                              <button
-                                key={key}
-                                onMouseDown={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'color_palette', key) }}
-                                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-[#F3F4F6] transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}
-                              >
-                                <div className="flex gap-0.5">
-                                  {pal.colors.slice(0, 4).map((c, i) => (
-                                    <div key={i} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c }} />
+                            {/* Font size (for all widget types) */}
+                            {(w.is_title_block || w.type === 'text_card') && (
+                              <>
+                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamano de texto</p>
+                                <div className="flex flex-wrap gap-1 mb-1.5">
+                                  {TEXT_SIZE_OPTIONS.map(opt => (
+                                    <button
+                                      key={opt.value}
+                                      onMouseDown={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'text_size', opt.value) }}
+                                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                                        (w.text_size || (w.is_title_block ? 'lg' : 'sm')) === opt.value
+                                          ? 'bg-primary text-white' : 'bg-[#F3F4F6] hover:bg-gray-200'
+                                      }`}
+                                    >
+                                      {opt.label}
+                                    </button>
                                   ))}
                                 </div>
-                                <span>{pal.name}</span>
-                              </button>
-                            ))}
-                            <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
-                              <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Ejes</p>
-                              <input
-                                className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary"
-                                placeholder="Etiqueta eje X"
-                                value={w.custom_x_label || ''}
-                                onMouseDown={e => e.stopPropagation()}
-                                onChange={e => updateWidgetField(w.grid_i, 'custom_x_label', e.target.value)}
-                              />
-                              <input
-                                className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
-                                placeholder="Etiqueta eje Y"
-                                value={w.custom_y_label || ''}
-                                onMouseDown={e => e.stopPropagation()}
-                                onChange={e => updateWidgetField(w.grid_i, 'custom_y_label', e.target.value)}
-                              />
-                            </div>
+                              </>
+                            )}
+                            {/* Color palette (for chart widgets) */}
+                            {!w.is_title_block && w.type !== 'text_card' && (
+                              <>
+                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Paleta</p>
+                                {Object.entries(COLOR_PALETTES).map(([key, pal]) => (
+                                  <button
+                                    key={key}
+                                    onMouseDown={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'color_palette', key) }}
+                                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-[#F3F4F6] transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}
+                                  >
+                                    <div className="flex gap-0.5">
+                                      {pal.colors.slice(0, 4).map((c, i) => (
+                                        <div key={i} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c }} />
+                                      ))}
+                                    </div>
+                                    <span>{pal.name}</span>
+                                  </button>
+                                ))}
+                                <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                                  <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Ejes</p>
+                                  <input
+                                    className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary"
+                                    placeholder="Etiqueta eje X"
+                                    value={w.custom_x_label || ''}
+                                    onMouseDown={e => e.stopPropagation()}
+                                    onChange={e => updateWidgetField(w.grid_i, 'custom_x_label', e.target.value)}
+                                  />
+                                  <input
+                                    className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
+                                    placeholder="Etiqueta eje Y"
+                                    value={w.custom_y_label || ''}
+                                    onMouseDown={e => e.stopPropagation()}
+                                    onChange={e => updateWidgetField(w.grid_i, 'custom_y_label', e.target.value)}
+                                  />
+                                </div>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -630,7 +673,7 @@ export default function DashboardBuilder() {
                       {w.is_title_block ? (
                         <div className="no-drag flex items-center justify-center flex-1 px-4">
                           <input
-                            className="text-lg font-bold text-center w-full bg-transparent border-0 outline-none text-[#1F2937]"
+                            className={`${TEXT_SIZE_CLASS[w.text_size || 'lg']} font-bold text-center w-full bg-transparent border-0 outline-none text-[#1F2937]`}
                             value={w.text_content || ''}
                             onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
                             placeholder="Titulo de seccion..."
@@ -639,7 +682,7 @@ export default function DashboardBuilder() {
                       ) : w.type === 'text_card' ? (
                         <div className="no-drag flex-1 flex flex-col gap-1 p-2">
                           <textarea
-                            className="flex-1 text-sm bg-transparent border-0 outline-none resize-none text-[#374151]"
+                            className={`flex-1 ${TEXT_SIZE_CLASS[w.text_size || 'sm']} bg-transparent border-0 outline-none resize-none text-[#374151]`}
                             value={w.text_content || ''}
                             onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
                             placeholder="Texto informativo..."

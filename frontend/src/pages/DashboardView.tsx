@@ -12,6 +12,11 @@ import 'react-resizable/css/styles.css'
 
 const ResponsiveGridLayout = WidthProvider(Responsive)
 
+const TEXT_SIZE_CLASS: Record<string, string> = {
+  xs: 'text-xs', sm: 'text-sm', base: 'text-base',
+  lg: 'text-lg', xl: 'text-xl', '2xl': 'text-2xl',
+}
+
 interface DashboardTab {
   id: string
   name: string
@@ -171,11 +176,11 @@ export default function DashboardView() {
                   {/* Title block — no header */}
                   {w.is_title_block ? (
                     <div className="flex items-center justify-center h-full px-4">
-                      <h2 className="text-lg font-bold text-[#1F2937] text-center">{w.text_content || w.title}</h2>
+                      <h2 className={`${TEXT_SIZE_CLASS[w.text_size || 'lg']} font-bold text-[#1F2937] text-center`}>{w.text_content || w.title}</h2>
                     </div>
                   ) : w.type === 'text_card' ? (
                     <div className="flex flex-col h-full p-4">
-                      <p className="text-sm text-[#374151] flex-1">{w.text_content}</p>
+                      <p className={`${TEXT_SIZE_CLASS[w.text_size || 'sm']} text-[#374151] flex-1`}>{w.text_content}</p>
                       {w.text_url && (
                         <a href={w.text_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary mt-2 underline">
                           {w.text_url}
