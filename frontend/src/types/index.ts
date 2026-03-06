@@ -80,6 +80,9 @@ export interface DashboardWidget {
   custom_x_label?: string
   custom_y_label?: string
   show_legend?: boolean
+  // Tab assignment
+  tab_id?: string
+  tab_name?: string
 }
 
 export interface TableInfo {

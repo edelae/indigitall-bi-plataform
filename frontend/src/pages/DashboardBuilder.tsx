@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
   Save, ArrowLeft, Plus, X, Info, Loader2,
   Sparkles, Send, GripVertical, LayoutTemplate,
   Type, Link as LinkIcon, Pencil, Palette,
+  FilePlus, Trash2, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
@@ -19,17 +21,35 @@ import 'react-resizable/css/styles.css'
 
 const ResponsiveGridLayout = WidthProvider(Responsive)
 
+// ─── Tab / Section Types ───────────────────────────────────────────
+interface DashboardTab {
+  id: string
+  name: string
+  widgets: DashboardWidget[]
+}
+
 export default function DashboardBuilder() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [widgets, setWidgets] = useState<DashboardWidget[]>([])
+
+  // Dashboard metadata
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [dashboardId, setDashboardId] = useState<number | null>(null)
+
+  // Tabs / sections
+  const [tabs, setTabs] = useState<DashboardTab[]>([
+    { id: 'tab-1', name: 'General', widgets: [] },
+  ])
+  const [activeTabId, setActiveTabId] = useState('tab-1')
+
+  // Queries sidebar
   const [queries, setQueries] = useState<SavedQuery[]>([])
+  const [querySearch, setQuerySearch] = useState('')
+
+  // Save state
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const [querySearch, setQuerySearch] = useState('')
 
   // AI Assistant
   const [aiOpen, setAiOpen] = useState(false)
@@ -46,15 +66,31 @@ export default function DashboardBuilder() {
 
   // Edit widget title
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
-  // Color palette picker
-  const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null)
+  // Widget settings dropdown
+  const [settingsOpen, setSettingsOpen] = useState<string | null>(null)
+  // Tab rename
+  const [editingTab, setEditingTab] = useState<string | null>(null)
 
-  // Load available queries
+  // Canvas ref for responsive templates
+  const canvasRef = useRef<HTMLDivElement>(null)
+
+  // ─── Helpers ──────────────────────────────────────────────
+  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0]
+  const widgets = activeTab?.widgets || []
+
+  const setWidgets = useCallback((updater: DashboardWidget[] | ((prev: DashboardWidget[]) => DashboardWidget[])) => {
+    setTabs(prev => prev.map(t => {
+      if (t.id !== activeTabId) return t
+      const newWidgets = typeof updater === 'function' ? updater(t.widgets) : updater
+      return { ...t, widgets: newWidgets }
+    }))
+  }, [activeTabId])
+
+  // ─── Load data ─────────────────────────────────────────────
   useEffect(() => {
     listQueries({ limit: 100 }).then(r => setQueries(r.queries)).catch(() => {})
   }, [])
 
-  // Load existing dashboard or preload query
   useEffect(() => {
     const editId = searchParams.get('edit')
     const queryId = searchParams.get('query_id')
@@ -63,26 +99,51 @@ export default function DashboardBuilder() {
         setName(d.name)
         setDescription(d.description || '')
         setDashboardId(d.id)
-        const loaded = (d.layout || []).map((w: DashboardWidget, i: number) => ({
-          ...w,
-          grid_i: w.grid_i || `widget-${i}`,
-          grid_x: w.grid_x ?? (i % 2) * 6,
-          grid_y: w.grid_y ?? Math.floor(i / 2) * 4,
-          grid_w: w.grid_w ?? w.width ?? 6,
-          grid_h: w.grid_h ?? 4,
-        }))
-        setWidgets(loaded)
+        // Reconstruct tabs from layout
+        const layout = d.layout || []
+        if (layout.length > 0 && layout[0]?.tab_id) {
+          // Multi-tab layout
+          const tabMap = new Map<string, DashboardTab>()
+          for (const w of layout) {
+            const tid = w.tab_id || 'tab-1'
+            const tname = w.tab_name || 'General'
+            if (!tabMap.has(tid)) tabMap.set(tid, { id: tid, name: tname, widgets: [] })
+            tabMap.get(tid)!.widgets.push({
+              ...w,
+              grid_i: w.grid_i || `widget-${Math.random().toString(36).slice(2)}`,
+              grid_x: w.grid_x ?? 0,
+              grid_y: w.grid_y ?? 0,
+              grid_w: w.grid_w ?? w.width ?? 6,
+              grid_h: w.grid_h ?? 4,
+            })
+          }
+          const loadedTabs = Array.from(tabMap.values())
+          setTabs(loadedTabs)
+          setActiveTabId(loadedTabs[0].id)
+        } else {
+          // Single-tab legacy layout
+          const loaded = layout.map((w: DashboardWidget, i: number) => ({
+            ...w,
+            grid_i: w.grid_i || `widget-${i}`,
+            grid_x: w.grid_x ?? (i % 2) * 6,
+            grid_y: w.grid_y ?? Math.floor(i / 2) * 4,
+            grid_w: w.grid_w ?? w.width ?? 6,
+            grid_h: w.grid_h ?? 4,
+          }))
+          setTabs([{ id: 'tab-1', name: 'General', widgets: loaded }])
+          setActiveTabId('tab-1')
+        }
       }).catch(() => {})
     } else if (queryId) {
       addQueryWidget(parseInt(queryId))
     }
   }, []) // eslint-disable-line
 
+  // ─── Widget actions ────────────────────────────────────────
   const addQueryWidget = async (queryId: number) => {
     try {
       const q = await getQuery(queryId)
       const chartType = q.visualizations?.[0]?.type || 'bar'
-      const idx = widgets.length
       const newWidget: DashboardWidget = {
         query_id: q.id,
         title: q.name.slice(0, 60),
@@ -93,8 +154,8 @@ export default function DashboardBuilder() {
         columns: (q.result_columns || []).map(c => c.name),
         sql: q.generated_sql || '',
         query_text: q.query_text || '',
-        grid_i: `widget-${Date.now()}-${idx}`,
-        grid_x: (idx % 2) * 6,
+        grid_i: `widget-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        grid_x: 0,
         grid_y: 0,
         grid_w: 6,
         grid_h: 4,
@@ -104,7 +165,6 @@ export default function DashboardBuilder() {
   }
 
   const addTitleBlock = () => {
-    const idx = widgets.length
     const newWidget: DashboardWidget = {
       title: 'Titulo de seccion',
       type: 'title',
@@ -113,9 +173,9 @@ export default function DashboardBuilder() {
       width: 12,
       data: [],
       columns: [],
-      grid_i: `title-${Date.now()}-${idx}`,
+      grid_i: `title-${Date.now()}`,
       grid_x: 0,
-      grid_y: 999,
+      grid_y: 0,
       grid_w: 12,
       grid_h: 2,
     }
@@ -123,7 +183,6 @@ export default function DashboardBuilder() {
   }
 
   const addTextCard = () => {
-    const idx = widgets.length
     const newWidget: DashboardWidget = {
       title: 'Tarjeta informativa',
       type: 'text_card',
@@ -132,22 +191,22 @@ export default function DashboardBuilder() {
       width: 4,
       data: [],
       columns: [],
-      grid_i: `text-${Date.now()}-${idx}`,
+      grid_i: `text-${Date.now()}`,
       grid_x: 0,
-      grid_y: 999,
+      grid_y: 0,
       grid_w: 4,
       grid_h: 3,
     }
     setWidgets(prev => [...prev, newWidget])
   }
 
-  const removeWidget = (gridI: string) => {
+  const removeWidget = useCallback((gridI: string) => {
     setWidgets(prev => prev.filter(w => w.grid_i !== gridI))
-  }
+  }, [setWidgets])
 
-  const updateWidgetField = (gridI: string, field: string, value: any) => {
+  const updateWidgetField = useCallback((gridI: string, field: string, value: any) => {
     setWidgets(prev => prev.map(w => w.grid_i === gridI ? { ...w, [field]: value } : w))
-  }
+  }, [setWidgets])
 
   const handleLayoutChange = useCallback((layout: any[]) => {
     setWidgets(prev => {
@@ -163,18 +222,44 @@ export default function DashboardBuilder() {
       }
       return updated
     })
-  }, [])
+  }, [setWidgets])
 
+  // ─── Tab actions ──────────────────────────────────────────
+  const addTab = () => {
+    const newTab: DashboardTab = {
+      id: `tab-${Date.now()}`,
+      name: `Seccion ${tabs.length + 1}`,
+      widgets: [],
+    }
+    setTabs(prev => [...prev, newTab])
+    setActiveTabId(newTab.id)
+  }
+
+  const renameTab = (tabId: string, newName: string) => {
+    setTabs(prev => prev.map(t => t.id === tabId ? { ...t, name: newName } : t))
+  }
+
+  const removeTab = (tabId: string) => {
+    if (tabs.length <= 1) return
+    const remaining = tabs.filter(t => t.id !== tabId)
+    setTabs(remaining)
+    if (activeTabId === tabId) setActiveTabId(remaining[0].id)
+  }
+
+  // ─── Save ─────────────────────────────────────────────────
   const handleSave = async () => {
     if (!name.trim()) { setFeedback({ type: 'error', text: 'Ingresa un nombre' }); return }
-    if (!widgets.length) { setFeedback({ type: 'error', text: 'Agrega al menos un widget' }); return }
+    const allWidgets = tabs.flatMap(t =>
+      t.widgets.map(w => ({ ...w, tab_id: t.id, tab_name: t.name }))
+    )
+    if (!allWidgets.length) { setFeedback({ type: 'error', text: 'Agrega al menos un widget' }); return }
     setSaving(true)
     try {
       if (dashboardId) {
-        await updateDashboard(dashboardId, widgets)
+        await updateDashboard(dashboardId, allWidgets)
         setFeedback({ type: 'success', text: 'Tablero actualizado' })
       } else {
-        const result = await saveDashboard({ name: name.trim(), description: description.trim(), layout: widgets })
+        const result = await saveDashboard({ name: name.trim(), description: description.trim(), layout: allWidgets })
         setDashboardId(result.id)
         setFeedback({ type: 'success', text: 'Tablero guardado' })
       }
@@ -186,13 +271,12 @@ export default function DashboardBuilder() {
     }
   }
 
-  // AI: execute question and add as widget
+  // ─── AI Assistant ─────────────────────────────────────────
   const executeAiQuestion = async (question: string) => {
     setAiLoading(true)
     try {
       const result = await sendChat(question)
       if (result.data?.length) {
-        const idx = widgets.length
         const isKpi = result.chart_type === 'kpi' || question.toLowerCase().includes('kpi') || question.toLowerCase().includes('tarjeta')
         const newWidget: DashboardWidget = {
           title: result.query_details?.title || question.slice(0, 60),
@@ -203,7 +287,7 @@ export default function DashboardBuilder() {
           columns: result.columns,
           sql: result.query_details?.sql || '',
           query_text: question,
-          grid_i: `ai-${Date.now()}-${idx}`,
+          grid_i: `ai-${Date.now()}`,
           grid_x: 0,
           grid_y: 0,
           grid_w: isKpi ? 3 : 6,
@@ -231,11 +315,7 @@ export default function DashboardBuilder() {
     executeAiQuestion(msg)
   }
 
-  const applyTemplate = (tmpl: GridTemplate) => {
-    setActiveTemplate(tmpl)
-    setTemplateOpen(false)
-  }
-
+  // ─── Grid layout ──────────────────────────────────────────
   const gridLayout = widgets.map(w => ({
     i: w.grid_i,
     x: w.grid_x,
@@ -252,52 +332,45 @@ export default function DashboardBuilder() {
 
   return (
     <div className="animate-fade-in">
-      {/* Top bar */}
-      <div className="flex items-start justify-between mb-4">
+      {/* ─── Top bar ─── */}
+      <div className="flex items-center justify-between mb-3 px-1">
         <div className="flex-1 max-w-lg">
           <input
-            className="w-full text-lg font-semibold border-0 border-b-2 border-border-light focus:border-primary outline-none pb-1 bg-transparent"
+            className="w-full text-lg font-bold border-0 border-b-2 border-transparent focus:border-primary outline-none pb-0.5 bg-transparent text-[#1F2937]"
             placeholder="Nombre del tablero..."
             value={name}
             onChange={e => setName(e.target.value)}
           />
           <input
-            className="w-full text-sm text-text-muted border-0 border-b border-border-light focus:border-primary/50 outline-none pb-1 mt-1 bg-transparent"
+            className="w-full text-xs text-[#6B7280] border-0 outline-none pb-0.5 mt-0.5 bg-transparent"
             placeholder="Descripcion (opcional)..."
             value={description}
             onChange={e => setDescription(e.target.value)}
           />
         </div>
-        <div className="flex gap-2">
-          {/* Templates button */}
-          <button
-            onClick={() => setTemplateOpen(!templateOpen)}
-            className="btn-secondary flex items-center gap-1.5 text-sm"
-            title="Templates de organizacion"
-          >
-            <LayoutTemplate size={14} /> Templates
+        <div className="flex gap-1.5">
+          <button onClick={() => setTemplateOpen(!templateOpen)} className="btn-secondary flex items-center gap-1 text-xs px-2.5 py-1.5">
+            <LayoutTemplate size={13} /> Templates
           </button>
-          {/* Add title block */}
-          <button onClick={addTitleBlock} className="btn-secondary flex items-center gap-1.5 text-sm" title="Agregar titulo">
-            <Type size={14} /> Titulo
+          <button onClick={addTitleBlock} className="btn-secondary flex items-center gap-1 text-xs px-2.5 py-1.5">
+            <Type size={13} /> Titulo
           </button>
-          {/* Add text card */}
-          <button onClick={addTextCard} className="btn-secondary flex items-center gap-1.5 text-sm" title="Agregar tarjeta de texto">
-            <LinkIcon size={14} /> Tarjeta
+          <button onClick={addTextCard} className="btn-secondary flex items-center gap-1 text-xs px-2.5 py-1.5">
+            <LinkIcon size={13} /> Tarjeta
           </button>
-          <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-1.5 text-sm">
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-1 text-xs px-3 py-1.5">
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
             {dashboardId ? 'Actualizar' : 'Guardar'}
           </button>
-          <Link to="/tableros" className="btn-secondary flex items-center gap-1.5 text-sm no-underline">
-            <ArrowLeft size={14} /> Volver
+          <Link to="/tableros" className="btn-secondary flex items-center gap-1 text-xs px-2.5 py-1.5 no-underline">
+            <ArrowLeft size={13} /> Volver
           </Link>
         </div>
       </div>
 
       {/* Feedback */}
       {feedback && (
-        <div className={`mb-4 px-4 py-2 rounded-btn text-sm ${feedback.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+        <div className={`mb-3 px-4 py-2 rounded-lg text-sm ${feedback.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
           {feedback.text}
           {feedback.type === 'success' && dashboardId && (
             <Link to={`/tableros/saved/${dashboardId}`} className="ml-2 underline">Ver tablero</Link>
@@ -307,81 +380,106 @@ export default function DashboardBuilder() {
 
       {/* Templates panel */}
       {templateOpen && (
-        <div className="mb-4 card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold">Plantillas de organizacion</h3>
-            <button onClick={() => setTemplateOpen(false)} className="btn-icon p-1"><X size={14} /></button>
+        <div className="mb-3 bg-white border border-[#E5E7EB] rounded-lg p-3 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold text-[#374151]">Plantillas de organizacion</h3>
+            <button onClick={() => setTemplateOpen(false)} className="p-0.5 hover:bg-gray-100 rounded"><X size={14} /></button>
           </div>
-          <div className="grid grid-cols-4 md:grid-cols-7 gap-3">
+          <div className="grid grid-cols-4 md:grid-cols-7 gap-2">
             {GRID_TEMPLATES.map(tmpl => (
               <button
                 key={tmpl.id}
-                onClick={() => applyTemplate(tmpl)}
-                className={`border rounded-btn p-2 hover:border-primary/50 transition-colors ${activeTemplate?.id === tmpl.id ? 'border-primary bg-primary/5' : 'border-border-light'}`}
+                onClick={() => { setActiveTemplate(activeTemplate?.id === tmpl.id ? null : tmpl); setTemplateOpen(false) }}
+                className={`border rounded-lg p-1.5 hover:border-primary/50 transition-colors ${activeTemplate?.id === tmpl.id ? 'border-primary bg-primary/5' : 'border-[#E5E7EB]'}`}
               >
-                {/* Mini grid preview */}
-                <div className="relative w-full aspect-[3/2] bg-surface rounded mb-1">
+                <div className="relative w-full aspect-[3/2] bg-[#F3F4F6] rounded mb-0.5">
                   {tmpl.zones.map((z, i) => (
-                    <div
-                      key={i}
-                      className="absolute bg-primary/20 border border-primary/30 rounded-sm"
-                      style={{
-                        left: `${(z.x / 12) * 100}%`,
-                        top: `${(z.y / 8) * 100}%`,
-                        width: `${(z.w / 12) * 100}%`,
-                        height: `${(z.h / 8) * 100}%`,
-                      }}
+                    <div key={i} className="absolute bg-primary/20 border border-primary/30 rounded-sm"
+                      style={{ left: `${(z.x / 12) * 100}%`, top: `${(z.y / 8) * 100}%`, width: `${(z.w / 12) * 100}%`, height: `${(z.h / 8) * 100}%` }}
                     />
                   ))}
                 </div>
-                <p className="text-[10px] text-text-muted text-center">{tmpl.name}</p>
+                <p className="text-[9px] text-[#6B7280] text-center">{tmpl.name}</p>
               </button>
             ))}
-            {activeTemplate && (
-              <button
-                onClick={() => setActiveTemplate(null)}
-                className="border border-border-light rounded-btn p-2 hover:border-red-300 flex items-center justify-center text-xs text-text-muted"
-              >
-                Quitar guia
-              </button>
-            )}
           </div>
         </div>
       )}
 
-      {/* Main: sidebar + canvas */}
-      <div className="flex gap-4">
+      {/* ─── Tabs bar (sections) ─── */}
+      <div className="flex items-center gap-0.5 mb-0 border-b border-[#E5E7EB] bg-white px-1">
+        {tabs.map(tab => (
+          <div
+            key={tab.id}
+            className={`group flex items-center gap-1 px-3 py-1.5 text-xs font-medium cursor-pointer border-b-2 transition-colors ${
+              activeTabId === tab.id
+                ? 'border-primary text-primary bg-primary/5'
+                : 'border-transparent text-[#6B7280] hover:text-[#374151] hover:bg-gray-50'
+            }`}
+            onClick={() => setActiveTabId(tab.id)}
+          >
+            {editingTab === tab.id ? (
+              <input
+                className="text-xs font-medium border-0 border-b border-primary outline-none bg-transparent w-20"
+                value={tab.name}
+                onChange={e => renameTab(tab.id, e.target.value)}
+                onBlur={() => setEditingTab(null)}
+                onKeyDown={e => e.key === 'Enter' && setEditingTab(null)}
+                autoFocus
+                onClick={e => e.stopPropagation()}
+              />
+            ) : (
+              <span onDoubleClick={(e) => { e.stopPropagation(); setEditingTab(tab.id) }}>{tab.name}</span>
+            )}
+            {tabs.length > 1 && (
+              <button
+                onClick={e => { e.stopPropagation(); removeTab(tab.id) }}
+                className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-opacity"
+                title="Eliminar seccion"
+              >
+                <X size={10} className="text-red-400" />
+              </button>
+            )}
+          </div>
+        ))}
+        <button onClick={addTab} className="px-2 py-1.5 text-[#9CA3AF] hover:text-primary transition-colors" title="Nueva seccion">
+          <Plus size={14} />
+        </button>
+      </div>
+
+      {/* ─── Main: sidebar + canvas ─── */}
+      <div className="flex gap-0">
         {/* Sidebar: queries */}
-        <div className="w-64 flex-shrink-0 border-r border-border-light pr-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-          <h3 className="text-sm font-semibold text-text-dark mb-2 flex items-center gap-1.5">
-            <GripVertical size={14} /> Consultas Guardadas
+        <div className="w-56 flex-shrink-0 border-r border-[#E5E7EB] bg-white p-3 max-h-[calc(100vh-220px)] overflow-y-auto">
+          <h3 className="text-[11px] font-semibold text-[#374151] mb-2 uppercase tracking-wider flex items-center gap-1">
+            <GripVertical size={12} /> Consultas
           </h3>
           <input
-            className="input text-xs mb-2"
-            placeholder="Buscar consultas..."
+            className="w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-2 outline-none focus:border-primary bg-[#F9FAFB]"
+            placeholder="Buscar..."
             value={querySearch}
             onChange={e => setQuerySearch(e.target.value)}
           />
           {filteredQueries.length === 0 ? (
             <div className="text-center py-4">
-              <p className="text-xs text-text-muted">No hay consultas</p>
-              <Link to="/consultas/nueva" className="text-xs text-primary">Crear consulta</Link>
+              <p className="text-[10px] text-[#9CA3AF]">No hay consultas</p>
+              <Link to="/consultas/nueva" className="text-[10px] text-primary">Crear consulta</Link>
             </div>
           ) : (
             filteredQueries.map(q => {
               const chartType = q.visualizations?.[0]?.type || 'table'
               return (
-                <div key={q.id} className="card p-2.5 mb-2 hover:shadow-card-hover transition-shadow">
-                  <p className="text-xs font-semibold text-text-dark truncate">{q.name}</p>
-                  <div className="flex items-center gap-1 mt-1">
-                    <span className="badge badge-primary text-[9px]">{chartType.toUpperCase()}</span>
-                    <span className="text-[10px] text-text-muted">{q.result_row_count} filas</span>
+                <div key={q.id} className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg p-2 mb-1.5 hover:border-primary/30 transition-colors">
+                  <p className="text-[11px] font-medium text-[#374151] truncate">{q.name}</p>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-primary/10 text-primary rounded font-medium">{chartType.toUpperCase()}</span>
+                    <span className="text-[9px] text-[#9CA3AF]">{q.result_row_count} filas</span>
                   </div>
                   <button
                     onClick={() => addQueryWidget(q.id)}
-                    className="w-full mt-2 text-xs py-1 rounded-btn border border-primary/30 text-primary hover:bg-primary/5 transition-colors flex items-center justify-center gap-1"
+                    className="w-full mt-1.5 text-[10px] py-1 rounded border border-primary/30 text-primary hover:bg-primary/5 transition-colors flex items-center justify-center gap-1"
                   >
-                    <Plus size={12} /> Agregar
+                    <Plus size={10} /> Agregar
                   </button>
                 </div>
               )
@@ -390,35 +488,33 @@ export default function DashboardBuilder() {
         </div>
 
         {/* Canvas */}
-        <div className="flex-1 min-w-0 relative">
-          {/* Template guide overlay — visual reference only, non-interactive */}
+        <div ref={canvasRef} className="flex-1 min-w-0 relative bg-[#F3F4F6] min-h-[500px]" style={{ padding: 12 }}>
+          {/* Template guide overlay */}
           {activeTemplate && (
-            <div className="absolute inset-0 z-0 pointer-events-none">
+            <div className="absolute inset-3 z-0 pointer-events-none">
               {activeTemplate.zones.map((z, i) => (
                 <div
                   key={i}
-                  className="absolute border-2 border-dashed border-primary/20 bg-primary/5 rounded-card flex items-center justify-center"
+                  className="absolute border-2 border-dashed border-primary/15 bg-primary/[0.03] rounded-lg flex items-center justify-center"
                   style={{
                     left: `${(z.x / 12) * 100}%`,
-                    top: `${z.y * 92}px`,
+                    top: `${(z.y / 8) * 100}%`,
                     width: `${(z.w / 12) * 100}%`,
-                    height: `${z.h * 92}px`,
+                    height: `${(z.h / 8) * 100}%`,
                   }}
                 >
-                  <span className="text-[10px] text-primary/30 font-medium">
-                    {z.w}x{z.h}
-                  </span>
+                  <span className="text-[9px] text-primary/20 font-medium">{z.w}x{z.h}</span>
                 </div>
               ))}
             </div>
           )}
 
           {widgets.length === 0 ? (
-            <div className="border-2 border-dashed border-border rounded-card min-h-[400px] flex items-center justify-center">
+            <div className="border-2 border-dashed border-[#D1D5DB] rounded-xl min-h-[400px] flex items-center justify-center bg-white/50">
               <div className="text-center">
-                <GripVertical size={48} className="text-text-light mx-auto mb-3" />
-                <p className="text-text-muted text-sm">Agrega consultas desde el panel lateral</p>
-                <p className="text-text-light text-xs mt-1">Arrastra y redimensiona libremente</p>
+                <GripVertical size={40} className="text-[#D1D5DB] mx-auto mb-2" />
+                <p className="text-[#6B7280] text-sm">Agrega consultas desde el panel lateral</p>
+                <p className="text-[#9CA3AF] text-xs mt-1">Arrastra y redimensiona libremente</p>
               </div>
             </div>
           ) : (
@@ -430,18 +526,20 @@ export default function DashboardBuilder() {
               isDraggable
               isResizable
               compactType="vertical"
-              margin={[12, 12]}
+              margin={[8, 8]}
               onLayoutChange={handleLayoutChange}
+              draggableCancel=".no-drag"
               style={{ minHeight: 400 }}
             >
               {widgets.map(w => (
                 <div key={w.grid_i}>
-                  <div className="card h-full flex flex-col overflow-hidden">
+                  <div className="bg-white rounded-lg h-full flex flex-col overflow-hidden"
+                    style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                     {/* Header */}
-                    <div className="flex items-center justify-between px-3 py-1.5 bg-white border-b border-border-light">
+                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#F3F4F6] flex-shrink-0">
                       {editingTitle === w.grid_i ? (
                         <input
-                          className="text-xs font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent"
+                          className="no-drag text-[13px] font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent text-[#1F2937]"
                           value={w.custom_title || w.title}
                           onChange={e => updateWidgetField(w.grid_i, 'custom_title', e.target.value)}
                           onBlur={() => setEditingTitle(null)}
@@ -450,39 +548,52 @@ export default function DashboardBuilder() {
                         />
                       ) : (
                         <span
-                          className="text-xs font-semibold text-text-dark truncate cursor-pointer flex-1"
+                          className="text-[13px] font-semibold text-[#1F2937] truncate flex-1"
                           onDoubleClick={() => setEditingTitle(w.grid_i)}
-                          title="Doble clic para editar titulo"
+                          title="Doble clic para editar"
                         >
                           {w.custom_title || w.title}
                         </span>
                       )}
-                      <div className="flex gap-0.5 flex-shrink-0 relative">
-                        <button onClick={() => setEditingTitle(w.grid_i)} className="btn-icon p-0.5" title="Editar titulo">
-                          <Pencil size={10} />
+                      <div className="no-drag flex gap-0.5 flex-shrink-0 relative">
+                        <button
+                          onMouseDown={e => { e.stopPropagation(); setEditingTitle(w.grid_i) }}
+                          className="p-1 rounded hover:bg-gray-100 transition-colors" title="Editar titulo"
+                        >
+                          <Pencil size={10} className="text-[#9CA3AF]" />
                         </button>
                         {w.data?.length > 0 && !w.is_title_block && w.type !== 'text_card' && (
-                          <button onClick={() => setColorPickerOpen(colorPickerOpen === w.grid_i ? null : w.grid_i)} className="btn-icon p-0.5" title="Paleta de colores">
-                            <Palette size={10} />
+                          <button
+                            onMouseDown={e => { e.stopPropagation(); setSettingsOpen(settingsOpen === w.grid_i ? null : w.grid_i) }}
+                            className="p-1 rounded hover:bg-gray-100 transition-colors" title="Configuracion"
+                          >
+                            <Palette size={10} className="text-[#9CA3AF]" />
                           </button>
                         )}
                         {w.sql && (
-                          <button onClick={() => setSqlModal({ title: w.title, sql: w.sql || '', queryText: w.query_text || '' })} className="btn-icon p-0.5" title="Ver SQL">
-                            <Info size={11} />
+                          <button
+                            onMouseDown={e => { e.stopPropagation(); setSqlModal({ title: w.title, sql: w.sql || '', queryText: w.query_text || '' }) }}
+                            className="p-1 rounded hover:bg-gray-100 transition-colors" title="Ver SQL"
+                          >
+                            <Info size={10} className="text-[#9CA3AF]" />
                           </button>
                         )}
-                        <button onClick={() => removeWidget(w.grid_i)} className="btn-icon p-0.5 hover:text-red-500" title="Eliminar">
-                          <X size={11} />
+                        <button
+                          onMouseDown={e => { e.stopPropagation(); removeWidget(w.grid_i) }}
+                          className="p-1 rounded hover:bg-red-50 transition-colors" title="Eliminar"
+                        >
+                          <X size={10} className="text-[#9CA3AF] hover:text-red-500" />
                         </button>
-                        {/* Widget settings dropdown */}
-                        {colorPickerOpen === w.grid_i && (
-                          <div className="absolute top-6 right-0 bg-white border border-border-light rounded-btn shadow-lg z-30 p-2 min-w-[180px]" onClick={e => e.stopPropagation()}>
-                            <p className="text-[9px] text-text-light uppercase tracking-wider px-1 mb-1">Paleta</p>
+                        {/* Settings dropdown */}
+                        {settingsOpen === w.grid_i && (
+                          <div className="no-drag absolute top-7 right-0 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-30 p-2 min-w-[180px]"
+                            onMouseDown={e => e.stopPropagation()}>
+                            <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Paleta</p>
                             {Object.entries(COLOR_PALETTES).map(([key, pal]) => (
                               <button
                                 key={key}
-                                onClick={() => updateWidgetField(w.grid_i, 'color_palette', key)}
-                                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-surface transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}
+                                onMouseDown={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'color_palette', key) }}
+                                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-[#F3F4F6] transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}
                               >
                                 <div className="flex gap-0.5">
                                   {pal.colors.slice(0, 4).map((c, i) => (
@@ -492,18 +603,20 @@ export default function DashboardBuilder() {
                                 <span>{pal.name}</span>
                               </button>
                             ))}
-                            <div className="border-t border-border-light mt-1.5 pt-1.5">
-                              <p className="text-[9px] text-text-light uppercase tracking-wider px-1 mb-1">Ejes</p>
+                            <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                              <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Ejes</p>
                               <input
-                                className="w-full text-[11px] px-2 py-1 border border-border-light rounded mb-1 outline-none focus:border-primary"
+                                className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary"
                                 placeholder="Etiqueta eje X"
                                 value={w.custom_x_label || ''}
+                                onMouseDown={e => e.stopPropagation()}
                                 onChange={e => updateWidgetField(w.grid_i, 'custom_x_label', e.target.value)}
                               />
                               <input
-                                className="w-full text-[11px] px-2 py-1 border border-border-light rounded outline-none focus:border-primary"
+                                className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
                                 placeholder="Etiqueta eje Y"
                                 value={w.custom_y_label || ''}
+                                onMouseDown={e => e.stopPropagation()}
                                 onChange={e => updateWidgetField(w.grid_i, 'custom_y_label', e.target.value)}
                               />
                             </div>
@@ -512,63 +625,62 @@ export default function DashboardBuilder() {
                       </div>
                     </div>
 
-                    {/* Content */}
-                    <div className="flex-1 p-2 overflow-hidden">
-                      {/* Title block */}
+                    {/* Content — flex-1 fills remaining space */}
+                    <div className="flex-1 overflow-hidden flex flex-col" style={{ minHeight: 0 }}>
                       {w.is_title_block ? (
-                        <div className="flex items-center justify-center h-full">
+                        <div className="no-drag flex items-center justify-center flex-1 px-4">
                           <input
-                            className="text-lg font-bold text-center w-full bg-transparent border-0 outline-none text-text-dark"
+                            className="text-lg font-bold text-center w-full bg-transparent border-0 outline-none text-[#1F2937]"
                             value={w.text_content || ''}
                             onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
                             placeholder="Titulo de seccion..."
                           />
                         </div>
                       ) : w.type === 'text_card' ? (
-                        <div className="h-full flex flex-col gap-1 p-1">
+                        <div className="no-drag flex-1 flex flex-col gap-1 p-2">
                           <textarea
-                            className="flex-1 text-sm bg-transparent border-0 outline-none resize-none text-text-dark"
+                            className="flex-1 text-sm bg-transparent border-0 outline-none resize-none text-[#374151]"
                             value={w.text_content || ''}
                             onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
                             placeholder="Texto informativo..."
                           />
                           <input
-                            className="text-xs text-primary bg-transparent border-0 border-b border-border-light outline-none"
+                            className="text-xs text-primary bg-transparent border-0 border-b border-[#E5E7EB] outline-none"
                             value={w.text_url || ''}
                             onChange={e => updateWidgetField(w.grid_i, 'text_url', e.target.value)}
                             placeholder="URL (opcional)"
                           />
                         </div>
                       ) : w.type === 'kpi' && w.kpi_value !== undefined ? (
-                        <KpiCard
-                          label={w.kpi_label || w.title}
-                          value={w.kpi_value}
-                          color={PRIMARY_COLOR}
-                        />
+                        <div className="flex-1 flex items-center p-2">
+                          <KpiCard label={w.kpi_label || w.title} value={w.kpi_value} color={PRIMARY_COLOR} />
+                        </div>
                       ) : w.data?.length && w.columns?.length >= 2 ? (
-                        <ChartWidget
-                          data={w.data}
-                          columns={w.columns}
-                          chartType={(w.chart_type || w.type || 'bar') as ChartType}
-                          height={Math.max(w.grid_h * 80 - 60, 140)}
-                          colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
-                          xLabel={w.custom_x_label}
-                          yLabel={w.custom_y_label}
-                          showLegend={w.show_legend !== false}
-                        />
+                        <div className="flex-1 p-1" style={{ width: '100%', height: '100%' }}>
+                          <ChartWidget
+                            data={w.data}
+                            columns={w.columns}
+                            chartType={(w.chart_type || w.type || 'bar') as ChartType}
+                            height={Math.max(w.grid_h * 80 - 48, 120)}
+                            colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
+                            xLabel={w.custom_x_label}
+                            yLabel={w.custom_y_label}
+                            showLegend={w.show_legend !== false}
+                          />
+                        </div>
                       ) : w.data?.length ? (
-                        <div className="text-xs overflow-auto h-full">
+                        <div className="flex-1 text-xs overflow-auto p-2">
                           <table className="w-full">
                             <thead>
-                              <tr className="bg-surface">
+                              <tr className="bg-[#F9FAFB]">
                                 {w.columns.map(c => (
-                                  <th key={c} className="px-2 py-1 text-left text-[10px] font-semibold text-text-muted">{c}</th>
+                                  <th key={c} className="px-2 py-1 text-left text-[10px] font-semibold text-[#6B7280]">{c}</th>
                                 ))}
                               </tr>
                             </thead>
                             <tbody>
                               {w.data.slice(0, 8).map((row, ri) => (
-                                <tr key={ri} className="border-b border-border-light">
+                                <tr key={ri} className="border-b border-[#F3F4F6]">
                                   {w.columns.map(c => (
                                     <td key={c} className="px-2 py-1 text-[10px] truncate max-w-[120px]">{String(row[c] ?? '')}</td>
                                   ))}
@@ -578,7 +690,7 @@ export default function DashboardBuilder() {
                           </table>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-center h-full text-xs text-text-muted">Sin datos</div>
+                        <div className="flex-1 flex items-center justify-center text-xs text-[#9CA3AF]">Sin datos</div>
                       )}
                     </div>
                   </div>
@@ -589,83 +701,89 @@ export default function DashboardBuilder() {
         </div>
       </div>
 
-      {/* AI FAB — fixed position */}
-      <button
-        onClick={() => setAiOpen(!aiOpen)}
-        className="fixed bottom-6 right-6 btn-primary rounded-pill py-2.5 px-5 shadow-lg flex items-center gap-2 z-40"
-      >
-        <Sparkles size={16} /> Asistente IA
-      </button>
+      {/* ─── AI FAB — rendered via portal to ensure fixed positioning ─── */}
+      {createPortal(
+        <>
+          <button
+            onClick={() => setAiOpen(!aiOpen)}
+            className="btn-primary rounded-full py-2.5 px-5 shadow-lg flex items-center gap-2"
+            style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999 }}
+          >
+            <Sparkles size={16} /> Asistente IA
+          </button>
 
-      {/* AI Slide-over — fixed, doesn't push content */}
-      {aiOpen && (
-        <div className="fixed top-0 right-0 w-96 h-full bg-white shadow-2xl z-50 flex flex-col border-l border-border-light">
-          <div className="flex items-center justify-between p-4 border-b border-border-light">
-            <h3 className="font-semibold text-sm">Asistente IA para Tableros</h3>
-            <button onClick={() => setAiOpen(false)} className="btn-icon"><X size={16} /></button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            <div className="bg-surface p-3 rounded-card text-xs text-text-muted">
-              <Sparkles size={14} className="text-primary inline mr-1" />
-              Describe que metricas quieres. Ejecutare la consulta y la agregare automaticamente al canvas.
-              <br /><br />
-              Ejemplos:<br />
-              - "Agrega un KPI con el total de mensajes"<br />
-              - "Tendencia de mensajes por dia"<br />
-              - "Top 5 agentes por rendimiento"
-            </div>
-            {aiMessages.map((m, i) => (
-              <div key={i} className={`p-2 rounded-btn text-xs ${
-                m.role === 'user' ? 'bg-primary text-white ml-8' :
-                m.role === 'system' && m.content.startsWith('Agregado') ? 'bg-green-50 text-green-700' :
-                m.role === 'system' && m.content.startsWith('Error') ? 'bg-red-50 text-red-700' :
-                'bg-surface text-text-dark'
-              }`}>
-                {m.content}
+          {aiOpen && (
+            <div className="flex flex-col border-l border-[#E5E7EB]"
+              style={{ position: 'fixed', top: 0, right: 0, width: 384, height: '100vh', background: 'white', boxShadow: '-4px 0 24px rgba(0,0,0,0.1)', zIndex: 10000 }}>
+              <div className="flex items-center justify-between p-4 border-b border-[#E5E7EB]">
+                <h3 className="font-semibold text-sm text-[#1F2937]">Asistente IA para Tableros</h3>
+                <button onClick={() => setAiOpen(false)} className="p-1 hover:bg-gray-100 rounded"><X size={16} /></button>
               </div>
-            ))}
-            {aiLoading && (
-              <div className="flex items-center gap-2 text-xs text-text-muted">
-                <Loader2 size={12} className="animate-spin" /> Ejecutando y agregando...
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                <div className="bg-[#F3F4F6] p-3 rounded-lg text-xs text-[#6B7280]">
+                  <Sparkles size={14} className="text-primary inline mr-1" />
+                  Describe que metricas quieres. Ejecutare la consulta y la agregare al canvas.
+                  <br /><br />
+                  Ejemplos:<br />
+                  - "Agrega un KPI con el total de mensajes"<br />
+                  - "Tendencia de mensajes por dia"<br />
+                  - "Top 5 agentes por rendimiento"
+                </div>
+                {aiMessages.map((m, i) => (
+                  <div key={i} className={`p-2 rounded-lg text-xs ${
+                    m.role === 'user' ? 'bg-primary text-white ml-8' :
+                    m.role === 'system' && m.content.startsWith('Agregado') ? 'bg-green-50 text-green-700' :
+                    m.role === 'system' && m.content.startsWith('Error') ? 'bg-red-50 text-red-700' :
+                    'bg-[#F3F4F6] text-[#374151]'
+                  }`}>
+                    {m.content}
+                  </div>
+                ))}
+                {aiLoading && (
+                  <div className="flex items-center gap-2 text-xs text-[#9CA3AF]">
+                    <Loader2 size={12} className="animate-spin" /> Ejecutando y agregando...
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <div className="p-4 border-t border-border-light">
-            <div className="flex gap-2">
-              <input
-                className="input text-sm"
-                placeholder="Ej: Agrega una tarjeta con total de mensajes"
-                value={aiInput}
-                onChange={e => setAiInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAiSend()}
-              />
-              <button onClick={handleAiSend} className="btn-primary p-2" disabled={aiLoading}>
-                <Send size={14} />
-              </button>
+              <div className="p-4 border-t border-[#E5E7EB]">
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 text-sm px-3 py-2 border border-[#E5E7EB] rounded-lg outline-none focus:border-primary"
+                    placeholder="Ej: Agrega una tarjeta con total de mensajes"
+                    value={aiInput}
+                    onChange={e => setAiInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleAiSend()}
+                  />
+                  <button onClick={handleAiSend} className="btn-primary p-2 rounded-lg" disabled={aiLoading}>
+                    <Send size={14} />
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
+        </>,
+        document.body
       )}
 
       {/* SQL Modal */}
       {sqlModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setSqlModal(null)}>
-          <div className="bg-white rounded-card shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-border-light">
-              <h3 className="font-semibold">{sqlModal.title}</h3>
-              <button onClick={() => setSqlModal(null)} className="btn-icon"><X size={16} /></button>
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[#E5E7EB]">
+              <h3 className="font-semibold text-[#1F2937]">{sqlModal.title}</h3>
+              <button onClick={() => setSqlModal(null)} className="p-1 hover:bg-gray-100 rounded"><X size={16} /></button>
             </div>
             <div className="p-4 space-y-3">
               {sqlModal.queryText && (
                 <div>
-                  <p className="text-xs font-semibold text-text-muted mb-1">Pregunta original</p>
-                  <p className="text-sm">{sqlModal.queryText}</p>
+                  <p className="text-xs font-semibold text-[#6B7280] mb-1">Pregunta original</p>
+                  <p className="text-sm text-[#374151]">{sqlModal.queryText}</p>
                 </div>
               )}
               {sqlModal.sql && (
                 <div>
-                  <p className="text-xs font-semibold text-text-muted mb-1">SQL generado</p>
-                  <pre className="bg-[#1A1A2E] text-gray-300 p-3 rounded-btn text-xs overflow-x-auto font-mono whitespace-pre-wrap">{sqlModal.sql}</pre>
+                  <p className="text-xs font-semibold text-[#6B7280] mb-1">SQL generado</p>
+                  <pre className="bg-[#1A1A2E] text-gray-300 p-3 rounded-lg text-xs overflow-x-auto font-mono whitespace-pre-wrap">{sqlModal.sql}</pre>
                 </div>
               )}
             </div>
