@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, Component, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle } from 'lucide-react'
-import { Responsive } from 'react-grid-layout'
+import GridLayout from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import type { Dashboard, DashboardWidget, ChartType } from '../types'
@@ -10,9 +10,8 @@ import { getDashboard } from '../api/client'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
-// Grid constants — shared between builder and view
-const GRID_COLS = { lg: 12, md: 10, sm: 6, xs: 4 }
-const GRID_BREAKPOINTS = { lg: 1200, md: 996, sm: 768, xs: 480 }
+// Grid constants
+const GRID_COLS = 12
 const GRID_ROW_HEIGHT = 80
 const GRID_MARGIN: [number, number] = [12, 12]
 const GRID_PADDING: [number, number] = [12, 12]
@@ -237,10 +236,9 @@ export default function DashboardView() {
             </Link>
           </div>
         ) : containerWidth > 0 ? (
-          <Responsive
+          <GridLayout
             width={containerWidth}
-            layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout, xs: gridLayout }}
-            breakpoints={GRID_BREAKPOINTS}
+            layout={gridLayout}
             cols={GRID_COLS}
             rowHeight={GRID_ROW_HEIGHT}
             isDraggable={false}
@@ -390,7 +388,7 @@ export default function DashboardView() {
                 </WidgetErrorBoundary>
               </div>
             ))}
-          </Responsive>
+          </GridLayout>
         ) : (
           <div className="flex items-center justify-center py-16">
             <Loader2 size={24} className="animate-spin text-[#9CA3AF]" />
