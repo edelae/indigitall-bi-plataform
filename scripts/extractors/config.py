@@ -26,7 +26,7 @@ class ExtractionSettings(BaseSettings):
     EXTRACTION_MAX_RECORDS: int = 100  # page size (API max per request)
 
     # Rate-limiting / resilience
-    API_REQUEST_DELAY_SECONDS: float = 0.5
+    API_REQUEST_DELAY_SECONDS: float = 0.1
     API_MAX_RETRIES: int = 3
     API_TIMEOUT_SECONDS: int = 30
 

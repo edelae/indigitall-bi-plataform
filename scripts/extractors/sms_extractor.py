@@ -122,9 +122,9 @@ class SMSExtractor(BaseExtractor):
     # ------------------------------------------------------------------
 
     def _extract_sendings(self, app_id: str):
-        """GET /v2/sms/send — paginated list of ALL sendings."""
+        """GET /v2/sms/send — paginated list of ALL sendings (page_size=1000 for speed)."""
         page = 1
-        page_size = 100
+        page_size = 1000  # v2 API accepts up to 1000
         total_fetched = 0
         api_total = 0
 
@@ -151,7 +151,7 @@ class SMSExtractor(BaseExtractor):
             total_fetched += len(sendings)
             page += 1
 
-            if total_fetched % 10000 == 0:
+            if total_fetched % 50000 == 0:
                 print(f"    sms/send: {total_fetched:,} / {api_total:,} fetched...")
 
             if len(sendings) < page_size:
@@ -164,9 +164,9 @@ class SMSExtractor(BaseExtractor):
     # ------------------------------------------------------------------
 
     def _extract_contacts(self, app_id: str):
-        """GET /v2/sms/contact — paginated list of ALL SMS contacts."""
+        """GET /v2/sms/contact — paginated list of ALL SMS contacts (page_size=1000)."""
         page = 1
-        page_size = 100
+        page_size = 1000  # v2 API accepts up to 1000
         total_fetched = 0
         api_total = 0
 
