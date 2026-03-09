@@ -10,7 +10,7 @@ import { Responsive } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import type { DashboardWidget, SavedQuery, ChartType, GridTemplate } from '../types'
-import { GRID_TEMPLATES, PRIMARY_COLOR, COLOR_PALETTES } from '../types'
+import { GRID_TEMPLATES, PRIMARY_COLOR, COLOR_PALETTES, FONT_FAMILIES, SIZE_PRESETS } from '../types'
 import {
   listQueries, getQuery, getDashboard,
   saveDashboard, updateDashboard, sendChat, saveQuery,
@@ -490,14 +490,37 @@ export default function DashboardBuilder() {
         </div>
       )}
 
-      {/* Tabs bar */}
-      <div className="flex items-center gap-0.5 mb-0 border-b border-[#E5E7EB] bg-white px-1">
-        {tabs.map(tab => (
-          <div key={tab.id} className={`group flex items-center gap-1 px-3 py-1.5 text-xs font-medium cursor-pointer border-b-2 transition-colors ${
-            activeTabId === tab.id ? 'border-primary text-primary bg-primary/5' : 'border-transparent text-[#6B7280] hover:text-[#374151] hover:bg-gray-50'
-          }`} onClick={() => setActiveTabId(tab.id)}>
+      {/* Tabs bar — improved design (Prompt 5A) */}
+      <div className="flex items-center gap-1 mb-0 border-b border-[#E5E7EB] bg-white px-2 py-1"
+        onDragOver={e => e.preventDefault()}>
+        {tabs.map((tab, idx) => (
+          <div key={tab.id}
+            draggable
+            onDragStart={e => { e.dataTransfer.setData('tab-index', String(idx)) }}
+            onDrop={e => {
+              e.preventDefault()
+              const fromIdx = parseInt(e.dataTransfer.getData('tab-index'))
+              if (isNaN(fromIdx) || fromIdx === idx) return
+              setTabs(prev => {
+                const next = [...prev]
+                const [moved] = next.splice(fromIdx, 1)
+                next.splice(idx, 0, moved)
+                return next
+              })
+            }}
+            className={`group flex items-center gap-1.5 px-4 py-2 text-xs font-semibold cursor-pointer rounded-full transition-all select-none ${
+              activeTabId === tab.id
+                ? 'bg-primary text-white shadow-sm'
+                : 'text-[#6B7280] hover:text-[#374151] hover:bg-gray-100'
+            }`}
+            onClick={() => setActiveTabId(tab.id)}
+            onContextMenu={e => {
+              e.preventDefault()
+              setEditingTab(tab.id)
+            }}>
             {editingTab === tab.id ? (
-              <input className="text-xs font-medium border-0 border-b border-primary outline-none bg-transparent w-20"
+              <input className="text-xs font-semibold border-0 border-b border-white/50 outline-none bg-transparent w-24"
+                style={{ color: activeTabId === tab.id ? 'white' : '#374151' }}
                 value={tab.name} onChange={e => renameTab(tab.id, e.target.value)}
                 onBlur={() => setEditingTab(null)} onKeyDown={e => e.key === 'Enter' && setEditingTab(null)}
                 autoFocus onClick={e => e.stopPropagation()} />
@@ -506,13 +529,17 @@ export default function DashboardBuilder() {
             )}
             {tabs.length > 1 && (
               <button onClick={e => { e.stopPropagation(); removeTab(tab.id) }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-opacity" title="Eliminar seccion">
-                <X size={10} className="text-red-400" />
+                className={`opacity-0 group-hover:opacity-100 p-0.5 rounded-full transition-opacity ${
+                  activeTabId === tab.id ? 'hover:bg-white/20' : 'hover:bg-red-100'
+                }`} title="Eliminar">
+                <X size={10} className={activeTabId === tab.id ? 'text-white/70' : 'text-red-400'} />
               </button>
             )}
           </div>
         ))}
-        <button onClick={addTab} className="px-2 py-1.5 text-[#9CA3AF] hover:text-primary transition-colors" title="Nueva seccion"><Plus size={14} /></button>
+        <button onClick={addTab} className="px-3 py-2 text-[#9CA3AF] hover:text-primary hover:bg-gray-100 rounded-full transition-all" title="Nueva seccion">
+          <Plus size={14} />
+        </button>
       </div>
 
       {/* Main: sidebar + canvas */}
@@ -638,14 +665,16 @@ export default function DashboardBuilder() {
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#F3F4F6] flex-shrink-0">
                       {editingTitle === w.grid_i ? (
                         <input data-title-edit={w.grid_i}
-                          className="no-drag text-[13px] font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent text-[#1F2937]"
+                          className="no-drag font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent text-[#1F2937]"
+                          style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter' }}
                           value={w.custom_title || w.title}
                           onChange={e => updateWidgetField(w.grid_i, 'custom_title', e.target.value)}
                           onBlur={() => setEditingTitle(null)}
                           onKeyDown={e => { if (e.key === 'Enter') setEditingTitle(null) }}
                           autoFocus />
                       ) : (
-                        <span className="text-[13px] font-semibold text-[#1F2937] truncate flex-1 cursor-text"
+                        <span className="font-semibold text-[#1F2937] truncate flex-1 cursor-text"
+                          style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter' }}
                           onClick={() => startEditTitle(w.grid_i)} title="Clic para editar titulo">
                           {w.custom_title || w.title}
                         </span>
@@ -678,11 +707,40 @@ export default function DashboardBuilder() {
 
                         {/* Settings dropdown */}
                         {settingsOpen === w.grid_i && (
-                          <div className="no-drag absolute top-7 right-0 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-30 p-2 min-w-[180px]"
+                          <div className="no-drag absolute top-7 right-0 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-30 p-2 min-w-[220px] max-h-[420px] overflow-y-auto"
                             onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+
+                            {/* SIZE PRESETS (Prompt 2) — all widget types */}
+                            <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamaño</p>
+                            <div className="flex flex-wrap gap-1 mb-1.5">
+                              {SIZE_PRESETS.map(sz => (
+                                <button key={sz.label}
+                                  onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'grid_w', sz.w); updateWidgetField(w.grid_i, 'grid_h', sz.h) }}
+                                  className={`px-2 py-0.5 rounded text-[10px] transition-colors ${w.grid_w === sz.w && w.grid_h === sz.h ? 'bg-primary text-white' : 'bg-[#F3F4F6] hover:bg-gray-200'}`}>
+                                  {sz.label}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* CHART TYPE SELECTOR (Prompt 5B) — chart widgets only */}
+                            {w.data?.length > 0 && w.columns?.length >= 2 && w.type !== 'kpi' && !w.is_title_block && w.type !== 'text_card' && (
+                              <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tipo de gráfica</p>
+                                <div className="grid grid-cols-4 gap-1 mb-1.5">
+                                  {AI_CHART_OPTIONS.map(opt => (
+                                    <button key={opt.value}
+                                      onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'chart_type', opt.value) }}
+                                      className={`px-1 py-1 rounded text-[9px] text-center transition-colors ${(w.chart_type || 'bar') === opt.value ? 'bg-primary text-white' : 'bg-[#F3F4F6] hover:bg-gray-200'}`}>
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
                             {(w.is_title_block || w.type === 'text_card') && (
                               <>
-                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamano de texto</p>
+                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamaño de texto</p>
                                 <div className="flex flex-wrap gap-1 mb-1.5">
                                   {TEXT_SIZE_OPTIONS.map(opt => (
                                     <button key={opt.value}
@@ -716,30 +774,53 @@ export default function DashboardBuilder() {
                             )}
                             {!w.is_title_block && w.type !== 'text_card' && (
                               <>
-                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Paleta</p>
-                                {Object.entries(COLOR_PALETTES).map(([key, pal]) => (
-                                  <button key={key}
-                                    onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'color_palette', key) }}
-                                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-[#F3F4F6] transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}>
-                                    <div className="flex gap-0.5">
-                                      {pal.colors.slice(0, 4).map((c, ci) => <div key={ci} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c }} />)}
-                                    </div>
-                                    <span>{pal.name}</span>
-                                  </button>
-                                ))}
+                                <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                                  <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Paleta</p>
+                                  {Object.entries(COLOR_PALETTES).map(([key, pal]) => (
+                                    <button key={key}
+                                      onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'color_palette', key) }}
+                                      className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-[#F3F4F6] transition-colors ${w.color_palette === key ? 'bg-primary/10 font-semibold' : ''}`}>
+                                      <div className="flex gap-0.5">
+                                        {pal.colors.slice(0, 4).map((c, ci) => <div key={ci} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c }} />)}
+                                      </div>
+                                      <span>{pal.name}</span>
+                                    </button>
+                                  ))}
+                                </div>
                                 {w.type !== 'kpi' && (
                                   <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
                                     <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Ejes</p>
                                     <input className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary"
-                                      placeholder="Etiqueta eje X" value={w.custom_x_label || ''}
+                                      placeholder="Nombre eje X" value={w.custom_x_label || ''}
                                       onClick={e => e.stopPropagation()} onChange={e => updateWidgetField(w.grid_i, 'custom_x_label', e.target.value)} />
                                     <input className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
-                                      placeholder="Etiqueta eje Y" value={w.custom_y_label || ''}
+                                      placeholder="Nombre eje Y" value={w.custom_y_label || ''}
                                       onClick={e => e.stopPropagation()} onChange={e => updateWidgetField(w.grid_i, 'custom_y_label', e.target.value)} />
                                   </div>
                                 )}
                               </>
                             )}
+
+                            {/* FONT CUSTOMIZATION (Prompt 4) — all widget types */}
+                            <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                              <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tipografía</p>
+                              <select className="no-drag w-full text-[11px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary bg-white"
+                                value={w.font_family || ''} onClick={e => e.stopPropagation()}
+                                onChange={e => updateWidgetField(w.grid_i, 'font_family', e.target.value || undefined)}>
+                                <option value="">Por defecto (Inter)</option>
+                                {FONT_FAMILIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                              </select>
+                              <div className="flex gap-1">
+                                <input className="no-drag w-1/2 text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
+                                  type="number" min="8" max="48" placeholder="Título px" value={w.title_font_size || ''}
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => updateWidgetField(w.grid_i, 'title_font_size', parseInt(e.target.value) || undefined)} />
+                                <input className="no-drag w-1/2 text-[11px] px-2 py-1 border border-[#E5E7EB] rounded outline-none focus:border-primary"
+                                  type="number" min="8" max="48" placeholder="Ejes px" value={w.axis_font_size || ''}
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => updateWidgetField(w.grid_i, 'axis_font_size', parseInt(e.target.value) || undefined)} />
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -775,7 +856,9 @@ export default function DashboardBuilder() {
                               fillContainer
                               colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
                               xLabel={w.custom_x_label} yLabel={w.custom_y_label}
-                              showLegend={w.show_legend !== false} />
+                              showLegend={w.show_legend !== false}
+                              fontFamily={w.font_family} axisFontSize={w.axis_font_size}
+                              legendFontSize={w.legend_font_size} />
                           </div>
                         </div>
                       ) : w.data?.length ? (

@@ -87,7 +87,35 @@ export interface DashboardWidget {
   // Tab assignment
   tab_id?: string
   tab_name?: string
+  // Font customization (Prompt 4)
+  font_family?: string
+  title_font_size?: number
+  axis_font_size?: number
+  kpi_value_font_size?: number
+  legend_font_size?: number
+  // Sub-tab assignment (Prompt 5)
+  sub_tab_id?: string
+  sub_tab_name?: string
 }
+
+// Font family options
+export const FONT_FAMILIES = [
+  { value: 'Inter', label: 'Inter' },
+  { value: 'Roboto', label: 'Roboto' },
+  { value: 'Merriweather', label: 'Merriweather' },
+  { value: 'Montserrat', label: 'Montserrat' },
+  { value: 'JetBrains Mono', label: 'Monospace' },
+]
+
+// Widget size presets (Prompt 2)
+export const SIZE_PRESETS = [
+  { label: 'XS', w: 2, h: 2 },
+  { label: 'S', w: 3, h: 2 },
+  { label: 'M', w: 4, h: 3 },
+  { label: 'L', w: 6, h: 4 },
+  { label: 'XL', w: 8, h: 4 },
+  { label: 'Full', w: 12, h: 4 },
+]
 
 export interface TableInfo {
   table_name: string

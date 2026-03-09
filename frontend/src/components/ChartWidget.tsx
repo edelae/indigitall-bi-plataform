@@ -19,27 +19,74 @@ interface Props {
   showLegend?: boolean
   onClickPoint?: (point: Record<string, any>) => void
   fillContainer?: boolean
+  fontFamily?: string
+  axisFontSize?: number
+  legendFontSize?: number
 }
 
 const LABELS: Record<string, string> = {
-  date: 'Fecha', fecha: 'Fecha', messages: 'Mensajes', count: 'Cantidad',
-  total: 'Total', name: 'Nombre', value: 'Valor', agent_name: 'Agente',
-  contact_name: 'Contacto', status: 'Estado', hour: 'Hora', day: 'Dia',
-  month: 'Mes', category: 'Categoria', channel: 'Canal', type: 'Tipo',
-  rate: 'Tasa', percentage: 'Porcentaje',
+  // Date/time
+  date: 'Fecha', fecha: 'Fecha', created_at: 'Fecha Creación', updated_at: 'Fecha Actualización',
+  sent_at: 'Fecha Envío', stats_date: 'Fecha', statsdate: 'Fecha',
+  hour: 'Hora', day: 'Día', month: 'Mes', week: 'Semana', year: 'Año',
+  day_of_week: 'Día de la Semana', dia_semana: 'Día de la Semana',
+  // Counts
+  count: 'Cantidad', total: 'Total', messages: 'Mensajes', msg_count: 'Mensajes',
+  total_messages: 'Total Mensajes', total_sent: 'Total Enviados',
+  total_delivered: 'Total Entregados', total_clicks: 'Total Clicks',
+  total_chunks: 'Total Chunks', total_cost: 'Costo Total',
+  total_enviados: 'Total Enviados', total_entregados: 'Total Entregados',
+  unique_contacts: 'Contactos Únicos', num_contacts_sent: 'Contactos Enviados',
+  num_contacts_clicked: 'Contactos con Click',
+  // Entities
+  name: 'Nombre', value: 'Valor', agent_name: 'Agente', contact_name: 'Contacto',
+  contact_id: 'ID Contacto', phone: 'Teléfono', campaign_name: 'Campaña',
+  campaign_id: 'ID Campaña',
+  // Status/categories
+  status: 'Estado', category: 'Categoría', channel: 'Canal', canal: 'Canal',
+  type: 'Tipo', direction: 'Dirección', intent: 'Intención',
+  // Rates
+  rate: 'Tasa', percentage: 'Porcentaje', ctr: 'CTR', delivery_rate: 'Tasa Entrega',
+  fallback_rate: 'Tasa Fallback', rejection_rate: 'Tasa Rechazo',
+  // Metrics
+  cost: 'Costo', clicks: 'Clicks', enviados: 'Enviados', entregados: 'Entregados',
+  abiertos: 'Abiertos', conversiones: 'Conversiones',
+  avg_handle_time: 'Tiempo Promedio', avg_response_time: 'Tiempo Respuesta',
+  first_response_time: 'Primera Respuesta',
 }
+
+// Pattern-based label detection
+const LABEL_PATTERNS: [RegExp, string][] = [
+  [/^total_/, 'Total '],
+  [/^avg_/, 'Promedio '],
+  [/^num_/, 'N° '],
+  [/^is_/, '¿Es '],
+  [/^has_/, '¿Tiene '],
+  [/_count$/, ' (Cantidad)'],
+  [/_rate$/, ' (Tasa)'],
+  [/_pct$/, ' (%)'],
+  [/_id$/, ' ID'],
+]
 
 function getLabel(col: string): string {
   const lower = col.toLowerCase()
-  return LABELS[lower] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  if (LABELS[lower]) return LABELS[lower]
+  // Try without common prefixes/suffixes
+  const stripped = lower.replace(/^(total|avg|num|max|min)_/, '').replace(/_(count|rate|pct|id)$/, '')
+  if (LABELS[stripped]) return LABELS[stripped]
+  // Fallback: title-case with underscore replacement
+  return col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-export default function ChartWidget({ data, columns, chartType, height = 300, colors, xLabel, yLabel, showLegend = true, onClickPoint, fillContainer }: Props) {
+export default function ChartWidget({ data, columns, chartType, height = 300, colors, xLabel, yLabel, showLegend = true, onClickPoint, fillContainer, fontFamily, axisFontSize, legendFontSize }: Props) {
   const xKey = columns[0]
   const yKey = columns.length > 1 ? columns[1] : columns[0]
   const yKeys = columns.slice(1)
   const palette = colors || CHART_COLORS
   const chartHeight: number | string = fillContainer ? '100%' : height
+  const axisFs = axisFontSize || 12
+  const legendFs = legendFontSize || 11
+  const ff = fontFamily || 'Inter'
 
   const processedData = useMemo(() => {
     return data.map(row => {
@@ -64,14 +111,23 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
     return null
   }
 
+  // Auto-generate axis labels from column names if user didn't set custom ones
+  const autoXLabel = xLabel || getLabel(xKey)
+  const autoYLabel = yLabel || (yKeys.length === 1 ? getLabel(yKeys[0]) : undefined)
+
   const commonAxisProps = {
-    tick: { fontSize: 12, fill: '#6E7191' },
+    tick: { fontSize: axisFs, fill: '#6E7191', fontFamily: ff },
     axisLine: { stroke: '#E4E4E7' },
     tickLine: false,
+    tickFormatter: (value: any) => {
+      if (typeof value === 'string' && value.length > 16) return value.slice(0, 14) + '…'
+      if (typeof value === 'number' && value >= 1000) return (value / 1000).toFixed(1) + 'K'
+      return value
+    },
   }
 
-  const xAxisLabel = xLabel ? { value: xLabel, position: 'insideBottom' as const, offset: -5, style: { fontSize: 11, fill: '#6E7191' } } : undefined
-  const yAxisLabel = yLabel ? { value: yLabel, angle: -90, position: 'insideLeft' as const, style: { fontSize: 11, fill: '#6E7191' } } : undefined
+  const xAxisLabel = { value: autoXLabel, position: 'insideBottom' as const, offset: -5, style: { fontSize: axisFs, fill: '#6E7191', fontFamily: ff } }
+  const yAxisLabel = autoYLabel ? { value: autoYLabel, angle: -90, position: 'insideLeft' as const, style: { fontSize: axisFs, fill: '#6E7191', fontFamily: ff } } : undefined
 
   const tooltipStyle = {
     contentStyle: {
@@ -80,11 +136,13 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
       borderRadius: 8,
       color: 'white',
       fontSize: 13,
-      fontFamily: 'Inter',
+      fontFamily: ff,
     },
     itemStyle: { color: 'white' },
     labelStyle: { color: '#A0A3BD', marginBottom: 4 },
   }
+
+  const legendStyle = { fontSize: legendFs, fontFamily: ff }
 
   const rotateX = data.length > 6
 
@@ -108,7 +166,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
             ))}
           </Pie>
           <Tooltip {...tooltipStyle} />
-          <Legend />
+          <Legend wrapperStyle={legendStyle} />
         </PieChart>
       </ResponsiveContainer>
     )
@@ -126,7 +184,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
           {yKeys.map((col, i) => (
             <Line key={col} type="monotone" dataKey={col} stroke={palette[i % palette.length]} strokeWidth={2.5} dot={{ fill: palette[i % palette.length], r: 3 }} activeDot={{ r: 5 }} name={getLabel(col)} />
           ))}
-          {yKeys.length > 1 && <Legend />}
+          {yKeys.length > 1 && <Legend wrapperStyle={legendStyle} />}
         </LineChart>
       </ResponsiveContainer>
     )
@@ -159,7 +217,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
           {yKeys.map((col, i) => (
             <Area key={col} type="monotone" dataKey={col} stackId="1" stroke={palette[i % palette.length]} fill={palette[i % palette.length]} fillOpacity={0.6} name={getLabel(col)} />
           ))}
-          <Legend />
+          <Legend wrapperStyle={legendStyle} />
         </AreaChart>
       </ResponsiveContainer>
     )
@@ -192,7 +250,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
           {yKeys.map((col, i) => (
             <Bar key={col} dataKey={col} stackId="stack" fill={palette[i % palette.length]} name={getLabel(col)} />
           ))}
-          <Legend />
+          <Legend wrapperStyle={legendStyle} />
         </BarChart>
       </ResponsiveContainer>
     )
@@ -224,7 +282,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
           <Tooltip {...tooltipStyle} />
           <Bar dataKey={yKeys[0]} fill={palette[0]} radius={[4, 4, 0, 0]} name={getLabel(yKeys[0])} />
           <Line type="monotone" dataKey={yKeys[1]} stroke={palette[1]} strokeWidth={2.5} dot={{ fill: palette[1], r: 3 }} name={getLabel(yKeys[1])} />
-          <Legend />
+          <Legend wrapperStyle={legendStyle} />
         </ComposedChart>
       </ResponsiveContainer>
     )
@@ -369,7 +427,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
           {yKeys.map((col, i) => (
             <Bar key={col} dataKey={col} fill={palette[i % palette.length]} radius={[4, 4, 0, 0]} name={getLabel(col)} />
           ))}
-          <Legend />
+          <Legend wrapperStyle={legendStyle} />
         </BarChart>
       </ResponsiveContainer>
     )

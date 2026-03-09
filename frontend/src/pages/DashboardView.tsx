@@ -156,17 +156,17 @@ export default function DashboardView() {
         </div>
       </div>
 
-      {/* Tabs bar */}
+      {/* Tabs bar — pill style */}
       {tabs.length > 1 && (
-        <div className="flex items-center gap-0.5 mb-0 border-b border-[#E5E7EB] bg-white px-1">
+        <div className="flex items-center gap-1 mb-0 border-b border-[#E5E7EB] bg-white px-2 py-1">
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTabId(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+              className={`px-4 py-2 text-xs font-semibold rounded-full transition-all ${
                 activeTabId === tab.id
-                  ? 'border-primary text-primary bg-primary/5'
-                  : 'border-transparent text-[#6B7280] hover:text-[#374151] hover:bg-gray-50'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-[#6B7280] hover:text-[#374151] hover:bg-gray-100'
               }`}
             >
               {tab.name}
@@ -218,7 +218,10 @@ export default function DashboardView() {
                   ) : (
                     <>
                       <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#F3F4F6] flex-shrink-0">
-                        <span className="text-[13px] font-semibold text-[#1F2937] truncate">{w.custom_title || w.title}</span>
+                        <span className="font-semibold text-[#1F2937] truncate"
+                          style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter' }}>
+                          {w.custom_title || w.title}
+                        </span>
                         <button onClick={() => setInfoModal(w)} className="p-0.5 hover:bg-gray-100 rounded" title="Ver info">
                           <Info size={10} className="text-[#9CA3AF]" />
                         </button>
@@ -252,6 +255,9 @@ export default function DashboardView() {
                                 xLabel={w.custom_x_label}
                                 yLabel={w.custom_y_label}
                                 showLegend={w.show_legend !== false}
+                                fontFamily={w.font_family}
+                                axisFontSize={w.axis_font_size}
+                                legendFontSize={w.legend_font_size}
                               />
                             </div>
                           </div>

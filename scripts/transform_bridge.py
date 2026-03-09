@@ -1041,90 +1041,42 @@ def update_agents_messages(conn) -> int:
 # ---------------------------------------------------------------------------
 
 def transform_sms_envios(conn) -> int:
-    """Transform raw SMS sendings from raw.raw_sms_stats → public.sms_envios."""
-    rows = conn.execute(text("""
-        WITH raw_rows AS (
-            SELECT
-                source_data,
-                coalesce(tenant_id, :tid) AS tenant_id,
-                coalesce(application_id, :app_id) AS application_id,
-                loaded_at
-            FROM raw.raw_sms_stats
-            WHERE endpoint = '/v2/sms/send'
-              AND source_data->'data'->'sendings' IS NOT NULL
-              AND jsonb_typeof(source_data->'data'->'sendings') = 'array'
-        ),
-        flattened AS (
-            SELECT
-                r.tenant_id,
-                r.application_id,
-                (elem->>'id')::text                              AS sending_id,
-                (elem->>'campaignId')::text                      AS campaign_id,
-                elem->'campaign'->>'name'                        AS campaign_name,
-                elem->>'phone'                                   AS phone,
-                elem->>'countryCode'                             AS country_code,
-                elem->>'externalCode'                            AS external_code,
-                coalesce((elem->>'totalChunks')::int, 1)         AS total_chunks,
-                (elem->>'cost')::numeric                         AS cost,
-                elem->>'message'                                 AS message_text,
-                elem->>'mccMnc'                                  AS mcc_mnc,
-                elem->>'networkName'                             AS network_name,
-                elem->>'status'                                  AS status,
-                elem->>'errorDescription'                        AS error_description,
-                elem->>'sendingType'                             AS sending_type,
-                coalesce((elem->>'isFlash')::boolean, false)     AS is_flash,
-                (elem->>'sentAt')::timestamptz                   AS sent_at,
-                coalesce((elem->>'clicks')::int, 0)              AS clicks,
-                elem->>'customData'                              AS custom_data,
-                r.loaded_at
-            FROM raw_rows r,
-                 jsonb_array_elements(r.source_data->'data'->'sendings') AS elem
-            WHERE elem->>'id' IS NOT NULL
-        ),
-        deduplicated AS (
-            SELECT *,
-                row_number() OVER (
-                    PARTITION BY tenant_id, sending_id
-                    ORDER BY loaded_at DESC
-                ) AS _rn
-            FROM flattened
-        )
-        SELECT tenant_id, application_id, sending_id, campaign_id, campaign_name,
-               phone, country_code, external_code, total_chunks, cost,
-               message_text, mcc_mnc, network_name, status, error_description,
-               sending_type, is_flash, sent_at, clicks, custom_data
-        FROM deduplicated WHERE _rn = 1
-    """), {"tid": TENANT_ID, "app_id": APP_ID}).fetchall()
+    """Transform raw SMS sendings from raw.raw_sms_stats → public.sms_envios.
 
-    count = 0
-    for r in rows:
-        conn.execute(text("""
-            INSERT INTO public.sms_envios
-                (tenant_id, application_id, campaign_id, campaign_name, sending_id,
-                 phone, country_code, external_code, total_chunks, cost,
-                 message_text, mcc_mnc, network_name, status, error_description,
-                 sending_type, is_flash, sent_at, clicks, custom_data)
-            VALUES
-                (:tenant_id, :application_id, :campaign_id, :campaign_name, :sending_id,
-                 :phone, :country_code, :external_code, :total_chunks, :cost,
-                 :message_text, :mcc_mnc, :network_name, :status, :error_description,
-                 :sending_type, :is_flash, :sent_at, :clicks, :custom_data)
-            ON CONFLICT (tenant_id, sending_id) DO UPDATE SET
-                status            = EXCLUDED.status,
-                error_description = EXCLUDED.error_description,
-                clicks            = EXCLUDED.clicks,
-                cost              = EXCLUDED.cost
-        """), {
-            "tenant_id": r[0], "application_id": r[1], "sending_id": r[2],
-            "campaign_id": r[3], "campaign_name": r[4],
-            "phone": r[5], "country_code": r[6], "external_code": r[7],
-            "total_chunks": r[8], "cost": r[9],
-            "message_text": r[10], "mcc_mnc": r[11], "network_name": r[12],
-            "status": r[13], "error_description": r[14],
-            "sending_type": r[15], "is_flash": r[16], "sent_at": r[17],
-            "clicks": r[18], "custom_data": r[19],
-        })
-        count += 1
+    The /v2/sms/send list endpoint returns summary fields only:
+    id, campaignId, sentAt, mode, type, flash, cancelled.
+    Detail fields (phone, status, cost) require /v2/sms/send/{id} and are not available in bulk.
+    """
+    count = conn.execute(text("""
+        INSERT INTO public.sms_envios
+            (tenant_id, application_id, campaign_id, sending_id,
+             sending_type, sending_mode, is_flash, cancelled, sent_at, clicks)
+        SELECT DISTINCT ON (tenant_id, sending_id)
+            tenant_id, application_id, campaign_id, sending_id,
+            sending_type, sending_mode, is_flash, cancelled, sent_at, 0
+        FROM (
+            SELECT
+                coalesce(r.tenant_id, :tid)                       AS tenant_id,
+                coalesce(r.application_id, :app_id)               AS application_id,
+                (elem->>'campaignId')::text                       AS campaign_id,
+                (elem->>'id')::text                               AS sending_id,
+                elem->>'type'                                     AS sending_type,
+                elem->>'mode'                                     AS sending_mode,
+                coalesce((elem->>'flash')::boolean, false)        AS is_flash,
+                coalesce((elem->>'cancelled')::boolean, false)    AS cancelled,
+                (elem->>'sentAt')::timestamptz                    AS sent_at,
+                r.loaded_at
+            FROM raw.raw_sms_stats r,
+                 jsonb_array_elements(r.source_data->'data'->'sendings') AS elem
+            WHERE r.endpoint = '/v2/sms/send'
+              AND jsonb_typeof(r.source_data->'data'->'sendings') = 'array'
+              AND elem->>'id' IS NOT NULL
+        ) sub
+        ORDER BY tenant_id, sending_id, loaded_at DESC
+        ON CONFLICT (tenant_id, sending_id) DO UPDATE SET
+            sending_mode = EXCLUDED.sending_mode,
+            cancelled    = EXCLUDED.cancelled
+    """), {"tid": TENANT_ID, "app_id": APP_ID}).rowcount
     return count
 
 
@@ -1148,10 +1100,10 @@ def transform_sms_campaigns(conn) -> int:
                 r.application_id,
                 (elem->>'id')::text                  AS campaign_id,
                 elem->>'name'                        AS name,
-                elem->>'status'                      AS status,
-                elem->>'sendingType'                 AS sending_type,
-                coalesce((elem->>'totalSendings')::int, 0) AS total_sendings,
-                coalesce((elem->>'totalContacts')::int, 0) AS total_contacts,
+                CASE WHEN (elem->>'enabled')::boolean THEN 'active' ELSE 'inactive' END AS status,
+                elem->>'lastSendingMode'             AS sending_type,
+                0                                    AS total_sendings,
+                0                                    AS total_contacts,
                 (elem->>'createdAt')::timestamptz    AS created_at,
                 (elem->>'updatedAt')::timestamptz    AS updated_at,
                 r.loaded_at
@@ -1278,18 +1230,18 @@ def transform_sms_daily_stats(conn) -> int:
             SELECT
                 r.tenant_id,
                 r.application_id,
-                (elem->>'date')::date                            AS date,
-                coalesce((elem->>'totalSent')::int, 0)           AS total_sent,
-                coalesce((elem->>'totalDelivered')::int, 0)      AS total_delivered,
-                coalesce((elem->>'totalRejected')::int, 0)       AS total_rejected,
-                coalesce((elem->>'totalChunks')::int, 0)         AS total_chunks,
-                coalesce((elem->>'totalClicks')::int, 0)         AS total_clicks,
-                coalesce((elem->>'uniqueContacts')::int, 0)      AS unique_contacts,
-                coalesce((elem->>'totalCost')::numeric, 0)       AS total_cost,
+                (elem->>'statsDate')::date                                AS date,
+                coalesce((elem->>'numContactsSent')::int, 0)              AS total_sent,
+                0                                                         AS total_delivered,
+                0                                                         AS total_rejected,
+                coalesce((elem->>'totalChunks')::int, 0)                  AS total_chunks,
+                coalesce((elem->>'numContactsClicked')::int, 0)           AS total_clicks,
+                coalesce((elem->>'numContactsSent')::int, 0)              AS unique_contacts,
+                coalesce((elem->>'cost')::numeric, 0)                     AS total_cost,
                 r.loaded_at
             FROM raw_rows r,
                  jsonb_array_elements(r.source_data->'data') AS elem
-            WHERE elem->>'date' IS NOT NULL
+            WHERE elem->>'statsDate' IS NOT NULL
         ),
         deduplicated AS (
             SELECT *,
