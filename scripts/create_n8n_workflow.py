@@ -166,7 +166,7 @@ def main():
         f"{N8N_BASE}/api/v1/workflows",
         data=body,
         headers={
-            "Authorization": f"Bearer {N8N_TOKEN}",
+            "X-N8N-API-KEY": N8N_TOKEN,
             "Content-Type": "application/json",
         },
         method="POST",
@@ -187,7 +187,7 @@ def main():
     activate_req = urllib.request.Request(
         f"{N8N_BASE}/api/v1/workflows/{workflow_id}/activate",
         headers={
-            "Authorization": f"Bearer {N8N_TOKEN}",
+            "X-N8N-API-KEY": N8N_TOKEN,
             "Content-Type": "application/json",
         },
         method="POST",
