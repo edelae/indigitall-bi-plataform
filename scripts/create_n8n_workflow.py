@@ -166,7 +166,7 @@ def main():
         f"{N8N_BASE}/api/v1/workflows",
         data=body,
         headers={
-            "X-N8N-API-KEY": N8N_TOKEN,
+            "Authorization": "Basic " + __import__("base64").b64encode(b"admin:JBkRgJwzCuZorQm59njCpQ").decode(),
             "Content-Type": "application/json",
         },
         method="POST",
@@ -187,7 +187,7 @@ def main():
     activate_req = urllib.request.Request(
         f"{N8N_BASE}/api/v1/workflows/{workflow_id}/activate",
         headers={
-            "X-N8N-API-KEY": N8N_TOKEN,
+            "Authorization": "Basic " + __import__("base64").b64encode(b"admin:JBkRgJwzCuZorQm59njCpQ").decode(),
             "Content-Type": "application/json",
         },
         method="POST",
