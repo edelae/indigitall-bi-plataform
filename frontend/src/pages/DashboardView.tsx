@@ -1,20 +1,17 @@
-import { useEffect, useState, useRef, useCallback, Component, type ReactNode } from 'react'
+import { useEffect, useState, Component, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle } from 'lucide-react'
-import GridLayout from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import type { Dashboard, DashboardWidget, ChartType } from '../types'
 import { PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 import { getDashboard } from '../api/client'
-import 'react-grid-layout/css/styles.css'
-import 'react-resizable/css/styles.css'
 
 // Grid constants
 const GRID_COLS = 12
 const GRID_ROW_HEIGHT = 80
-const GRID_MARGIN: [number, number] = [12, 12]
-const GRID_PADDING: [number, number] = [12, 12]
+const GRID_GAP = 12
+const GRID_PAD = 12
 
 const TEXT_SIZE_CLASS: Record<string, string> = {
   xs: 'text-xs', sm: 'text-sm', base: 'text-base',
@@ -53,30 +50,6 @@ class WidgetErrorBoundary extends Component<
   }
 }
 
-// Hook to measure container width via ResizeObserver
-function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
-  const [width, setWidth] = useState(0)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const w = entry.contentRect.width
-        if (w > 0) setWidth(w)
-      }
-    })
-    ro.observe(el)
-    const rect = el.getBoundingClientRect()
-    if (rect.width > 0) setWidth(rect.width)
-    requestAnimationFrame(() => {
-      const w = el.getBoundingClientRect().width
-      if (w > 0) setWidth(w)
-    })
-    return () => ro.disconnect()
-  }, [ref])
-  return width
-}
-
 export default function DashboardView() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -86,8 +59,6 @@ export default function DashboardView() {
   const [infoModal, setInfoModal] = useState<DashboardWidget | null>(null)
   const [tabs, setTabs] = useState<DashboardTab[]>([])
   const [activeTabId, setActiveTabId] = useState('')
-  const containerRef = useRef<HTMLDivElement>(null)
-  const containerWidth = useContainerWidth(containerRef)
 
   useEffect(() => {
     if (!id) return
@@ -158,14 +129,8 @@ export default function DashboardView() {
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0]
   const widgets = activeTab?.widgets || []
 
-  const gridLayout = widgets.map(w => ({
-    i: w.grid_i,
-    x: w.grid_x,
-    y: w.grid_y,
-    w: w.grid_w,
-    h: w.grid_h,
-    static: true,
-  }))
+  // Calculate total grid rows needed for this tab
+  const totalRows = widgets.reduce((max, w) => Math.max(max, (w.grid_y ?? 0) + (w.grid_h ?? 4)), 0)
 
   const handleChartClick = (widget: DashboardWidget) => {
     if (widget.query_id) {
@@ -220,9 +185,8 @@ export default function DashboardView() {
         </div>
       )}
 
-      {/* Canvas */}
+      {/* Canvas — Pure CSS Grid (no react-grid-layout dependency) */}
       <div
-        ref={containerRef}
         className={`bg-[#F8F9FB] min-h-[400px] ${tabs.length > 1 ? 'rounded-b-xl' : 'rounded-xl'} border border-[#E5E7EB] ${tabs.length > 1 ? 'border-t-0' : ''}`}
       >
         {widgets.length === 0 ? (
@@ -235,20 +199,26 @@ export default function DashboardView() {
               <Pencil size={14} /> Editar tablero
             </Link>
           </div>
-        ) : containerWidth > 0 ? (
-          <GridLayout
-            width={containerWidth}
-            layout={gridLayout}
-            cols={GRID_COLS}
-            rowHeight={GRID_ROW_HEIGHT}
-            isDraggable={false}
-            isResizable={false}
-            compactType="vertical"
-            margin={GRID_MARGIN}
-            containerPadding={GRID_PADDING}
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+              gridTemplateRows: `repeat(${totalRows}, ${GRID_ROW_HEIGHT}px)`,
+              gap: GRID_GAP,
+              padding: GRID_PAD,
+            }}
           >
             {widgets.map(w => (
-              <div key={w.grid_i}>
+              <div
+                key={w.grid_i}
+                style={{
+                  gridColumn: `${(w.grid_x ?? 0) + 1} / span ${w.grid_w ?? 6}`,
+                  gridRow: `${(w.grid_y ?? 0) + 1} / span ${w.grid_h ?? 4}`,
+                  minHeight: 0,
+                  minWidth: 0,
+                }}
+              >
                 <WidgetErrorBoundary widgetTitle={w.title}>
                   <div
                     className="bg-white h-full flex flex-col overflow-hidden border border-[#E8EAF0]"
@@ -388,10 +358,6 @@ export default function DashboardView() {
                 </WidgetErrorBoundary>
               </div>
             ))}
-          </GridLayout>
-        ) : (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 size={24} className="animate-spin text-[#9CA3AF]" />
           </div>
         )}
       </div>
