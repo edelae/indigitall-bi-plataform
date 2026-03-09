@@ -13,7 +13,7 @@ import type { DashboardWidget, SavedQuery, ChartType, GridTemplate } from '../ty
 import { GRID_TEMPLATES, PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 import {
   listQueries, getQuery, getDashboard,
-  saveDashboard, updateDashboard, sendChat,
+  saveDashboard, updateDashboard, sendChat, saveQuery,
 } from '../api/client'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -43,7 +43,32 @@ const KPI_STYLE_OPTIONS = [
   { value: 'progress', label: 'Con barra' },
 ]
 
-// Hook: measure container width via ResizeObserver
+// Chart type options for the AI assistant selector
+const AI_CHART_OPTIONS: { value: ChartType; label: string }[] = [
+  { value: 'bar', label: 'Barras' },
+  { value: 'line', label: 'Linea' },
+  { value: 'pie', label: 'Circular' },
+  { value: 'area', label: 'Area' },
+  { value: 'bar_horizontal', label: 'Barras H.' },
+  { value: 'bar_stacked', label: 'Apiladas' },
+  { value: 'scatter', label: 'Dispersion' },
+  { value: 'combo', label: 'Combo' },
+  { value: 'funnel', label: 'Embudo' },
+  { value: 'kpi', label: 'KPI' },
+  { value: 'table', label: 'Tabla' },
+  { value: 'heatmap', label: 'Heatmap' },
+]
+
+interface AiPendingResult {
+  question: string
+  data: Record<string, any>[]
+  columns: string[]
+  suggestedChartType: string
+  sql: string
+  title: string
+}
+
+// Hook: measure container width via ResizeObserver (with rAF fallback)
 function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
   const [width, setWidth] = useState(0)
   useEffect(() => {
@@ -54,6 +79,11 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number 
     })
     ro.observe(el)
     setWidth(el.getBoundingClientRect().width)
+    // Fallback: re-measure after layout paint in case initial width was 0
+    requestAnimationFrame(() => {
+      const w = el.getBoundingClientRect().width
+      if (w > 0) setWidth(w)
+    })
     return () => ro.disconnect()
   }, [ref])
   return width
@@ -86,6 +116,7 @@ export default function DashboardBuilder() {
   const [aiInput, setAiInput] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiMessages, setAiMessages] = useState<{ role: string; content: string }[]>([])
+  const [aiPendingResult, setAiPendingResult] = useState<AiPendingResult | null>(null)
 
   const [templateOpen, setTemplateOpen] = useState(false)
   const [activeTemplate, setActiveTemplate] = useState<GridTemplate | null>(null)
@@ -280,24 +311,77 @@ export default function DashboardBuilder() {
     try {
       const result = await sendChat(question)
       if (result.data?.length) {
-        const isKpi = result.chart_type === 'kpi' || question.toLowerCase().includes('kpi') || question.toLowerCase().includes('tarjeta')
-        setWidgets(prev => [...prev, {
+        const suggestedType = result.chart_type || 'bar'
+        setAiPendingResult({
+          question,
+          data: result.data,
+          columns: result.columns,
+          suggestedChartType: suggestedType,
+          sql: result.query_details?.sql || '',
           title: result.query_details?.title || question.slice(0, 60),
-          type: isKpi ? 'kpi' : (result.chart_type || 'bar'), chart_type: result.chart_type || 'bar',
-          width: isKpi ? 3 : 6, data: result.data, columns: result.columns,
-          sql: result.query_details?.sql || '', query_text: question,
-          grid_i: `ai-${Date.now()}`, grid_x: 0, grid_y: 0, grid_w: isKpi ? 3 : 6, grid_h: isKpi ? 2 : 4,
-          kpi_value: isKpi && result.data[0] ? result.data[0][result.columns[1]] || result.data[0][result.columns[0]] : undefined,
-          kpi_label: isKpi ? (result.query_details?.title || question.slice(0, 40)) : undefined,
+        })
+        setAiMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `Encontre ${result.data.length} resultados. Selecciona el tipo de grafica que prefieres:`,
         }])
-        setAiMessages(prev => [...prev, { role: 'system', content: `Agregado: "${question}" (${result.data.length} filas)` }])
       } else {
         setAiMessages(prev => [...prev, { role: 'assistant', content: result.response || `Sin datos para: "${question}"` }])
       }
     } catch (err: any) { setAiMessages(prev => [...prev, { role: 'system', content: `Error: ${err.message}` }]) }
     finally { setAiLoading(false) }
   }
-  const handleAiSend = () => { if (!aiInput.trim()) return; const m = aiInput.trim(); setAiInput(''); setAiMessages(p => [...p, { role: 'user', content: m }]); executeAiQuestion(m) }
+
+  const confirmAiWidget = async (chartType: ChartType) => {
+    if (!aiPendingResult) return
+    const { question, data, columns, sql, title } = aiPendingResult
+    setAiPendingResult(null)
+
+    try {
+      // Save as a reusable query
+      const saved = await saveQuery({
+        name: title || question.slice(0, 60),
+        query_text: question,
+        data,
+        columns,
+        generated_sql: sql || null,
+        chart_type: chartType,
+      })
+
+      const isKpi = chartType === 'kpi'
+
+      // Create widget linked to the saved query
+      setWidgets(prev => [...prev, {
+        query_id: saved.id,
+        title: title || question.slice(0, 60),
+        type: chartType, chart_type: chartType,
+        width: isKpi ? 3 : 6, data, columns,
+        sql: sql || '', query_text: question,
+        grid_i: `ai-${Date.now()}`, grid_x: 0, grid_y: 0,
+        grid_w: isKpi ? 3 : 6, grid_h: isKpi ? 2 : 4,
+        kpi_value: isKpi && data[0] ? data[0][columns[1]] || data[0][columns[0]] : undefined,
+        kpi_label: isKpi ? (title || question.slice(0, 40)) : undefined,
+      }])
+
+      // Refresh queries sidebar so the new query appears
+      listQueries({ limit: 100 }).then(r => setQueries(r.queries)).catch(() => {})
+
+      setAiMessages(prev => [...prev, {
+        role: 'system',
+        content: `Grafica "${chartType}" agregada al tablero. Consulta guardada (ID: ${saved.id}).`,
+      }])
+    } catch (err: any) {
+      setAiMessages(prev => [...prev, { role: 'system', content: `Error: ${err.message}` }])
+    }
+  }
+
+  const handleAiSend = () => {
+    if (!aiInput.trim()) return
+    const m = aiInput.trim()
+    setAiInput('')
+    setAiPendingResult(null)
+    setAiMessages(p => [...p, { role: 'user', content: m }])
+    executeAiQuestion(m)
+  }
 
   // ─── Drag from sidebar ────────────────────────────────────
   const handleDragStart = (e: React.DragEvent, queryId: number) => {
@@ -684,13 +768,15 @@ export default function DashboardBuilder() {
                             delta={w.kpi_delta} kpiStyle={w.kpi_style || 'accent'} maxValue={w.kpi_max_value} />
                         </div>
                       ) : w.data?.length && w.columns?.length >= 2 ? (
-                        <div className="flex-1 p-1" style={{ width: '100%', height: '100%' }}>
-                          <ChartWidget data={w.data} columns={w.columns}
-                            chartType={(w.chart_type || w.type || 'bar') as ChartType}
-                            height={Math.max(w.grid_h * GRID_ROW_HEIGHT - 48, 120)}
-                            colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
-                            xLabel={w.custom_x_label} yLabel={w.custom_y_label}
-                            showLegend={w.show_legend !== false} />
+                        <div className="flex-1" style={{ position: 'relative', minHeight: 0 }}>
+                          <div style={{ position: 'absolute', inset: 4 }}>
+                            <ChartWidget data={w.data} columns={w.columns}
+                              chartType={(w.chart_type || w.type || 'bar') as ChartType}
+                              fillContainer
+                              colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
+                              xLabel={w.custom_x_label} yLabel={w.custom_y_label}
+                              showLegend={w.show_legend !== false} />
+                          </div>
                         </div>
                       ) : w.data?.length ? (
                         <div className="flex-1 text-xs overflow-auto p-2">
@@ -742,11 +828,38 @@ export default function DashboardBuilder() {
                 {aiMessages.map((m, i) => (
                   <div key={i} className={`p-2 rounded-lg text-xs ${
                     m.role === 'user' ? 'bg-primary text-white ml-8' :
-                    m.role === 'system' && m.content.startsWith('Agregado') ? 'bg-green-50 text-green-700' :
+                    m.role === 'system' && m.content.startsWith('Grafica') ? 'bg-green-50 text-green-700' :
                     m.role === 'system' && m.content.startsWith('Error') ? 'bg-red-50 text-red-700' :
                     'bg-[#F3F4F6] text-[#374151]'
                   }`}>{m.content}</div>
                 ))}
+
+                {/* Chart type selector — shown when AI has pending results */}
+                {aiPendingResult && (
+                  <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg animate-fade-in">
+                    <p className="text-[11px] text-[#374151] mb-2 font-medium">Tipo de grafica:</p>
+                    <div className="grid grid-cols-4 gap-1">
+                      {AI_CHART_OPTIONS.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => confirmAiWidget(opt.value)}
+                          className={`px-1.5 py-1.5 rounded-lg text-center transition-colors border ${
+                            aiPendingResult.suggestedChartType === opt.value
+                              ? 'border-primary bg-primary/10 text-primary font-semibold'
+                              : 'border-[#E5E7EB] bg-white hover:bg-primary/5 text-[#6B7280]'
+                          }`}
+                        >
+                          <p className="text-[10px] leading-tight">{opt.label}</p>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[9px] text-[#9CA3AF] mt-1.5">
+                      Sugerido: <span className="font-medium text-primary">{aiPendingResult.suggestedChartType}</span>
+                      {' '}({aiPendingResult.data.length} filas)
+                    </p>
+                  </div>
+                )}
+
                 {aiLoading && <div className="flex items-center gap-2 text-xs text-[#9CA3AF]"><Loader2 size={12} className="animate-spin" /> Ejecutando...</div>}
               </div>
               <div className="p-4 border-t border-[#E5E7EB]">

@@ -28,19 +28,22 @@ interface DashboardTab {
   widgets: DashboardWidget[]
 }
 
-// Hook to measure container width via ResizeObserver
+// Hook to measure container width via ResizeObserver (with rAF fallback)
 function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
   const [width, setWidth] = useState(0)
   useEffect(() => {
     const el = ref.current
     if (!el) return
     const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setWidth(entry.contentRect.width)
-      }
+      for (const entry of entries) setWidth(entry.contentRect.width)
     })
     ro.observe(el)
     setWidth(el.getBoundingClientRect().width)
+    // Fallback: re-measure after layout paint in case initial width was 0
+    requestAnimationFrame(() => {
+      const w = el.getBoundingClientRect().width
+      if (w > 0) setWidth(w)
+    })
     return () => ro.disconnect()
   }, [ref])
   return width
@@ -238,17 +241,19 @@ export default function DashboardView() {
                             />
                           </div>
                         ) : w.data?.length && w.columns?.length >= 2 ? (
-                          <div className="flex-1 p-1" style={{ width: '100%', height: '100%' }}>
-                            <ChartWidget
-                              data={w.data}
-                              columns={w.columns}
-                              chartType={(w.chart_type || w.type || 'bar') as ChartType}
-                              height={Math.max(w.grid_h * GRID_ROW_HEIGHT - 48, 120)}
-                              colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
-                              xLabel={w.custom_x_label}
-                              yLabel={w.custom_y_label}
-                              showLegend={w.show_legend !== false}
-                            />
+                          <div className="flex-1" style={{ position: 'relative', minHeight: 0 }}>
+                            <div style={{ position: 'absolute', inset: 4 }}>
+                              <ChartWidget
+                                data={w.data}
+                                columns={w.columns}
+                                chartType={(w.chart_type || w.type || 'bar') as ChartType}
+                                fillContainer
+                                colors={w.color_palette ? COLOR_PALETTES[w.color_palette]?.colors : undefined}
+                                xLabel={w.custom_x_label}
+                                yLabel={w.custom_y_label}
+                                showLegend={w.show_legend !== false}
+                              />
+                            </div>
                           </div>
                         ) : w.data?.length ? (
                           <div className="flex-1 text-xs overflow-auto p-2">

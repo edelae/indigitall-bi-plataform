@@ -2,18 +2,127 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   LayoutGrid, Plus, Search, Star, Archive,
-  Clock, Loader2, Pencil, Eye, BarChart3, PieChart, LineChart,
+  Clock, Loader2, Pencil, Eye,
 } from 'lucide-react'
 import { listDashboards, toggleDashboardFavorite, archiveDashboard } from '../api/client'
-import type { Dashboard } from '../types'
+import type { Dashboard, DashboardWidget } from '../types'
 import { CHART_COLORS } from '../types'
 
-// Mini chart icon based on type
-function MiniChart({ type, index }: { type: string; index: number }) {
-  const color = CHART_COLORS[index % CHART_COLORS.length]
-  if (type === 'pie' || type === 'kpi') return <PieChart size={16} style={{ color }} />
-  if (type === 'line' || type === 'area') return <LineChart size={16} style={{ color }} />
-  return <BarChart3 size={16} style={{ color }} />
+// Simplified SVG representation of a chart type for the mini preview
+function MiniChartSvg({ type, color }: { type: string; color: string }) {
+  if (type === 'kpi' || type === 'text_card') {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-0.5">
+        <div className="h-1 rounded-full" style={{ width: '40%', backgroundColor: color }} />
+        <div className="h-0.5 bg-gray-200 rounded-full" style={{ width: '60%' }} />
+      </div>
+    )
+  }
+  if (type === 'title') {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="h-1 bg-gray-300 rounded-full" style={{ width: '70%' }} />
+      </div>
+    )
+  }
+  return (
+    <svg viewBox="0 0 40 24" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+      {type === 'line' || type === 'area' || type === 'area_stacked' ? (
+        <>
+          {type.includes('area') && (
+            <polygon points="4,16 12,10 20,13 28,6 36,9 36,22 4,22" fill={color} fillOpacity="0.15" />
+          )}
+          <polyline points="4,16 12,10 20,13 28,6 36,9" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : type === 'pie' ? (
+        <g transform="translate(20,12)">
+          <circle r="10" fill={color} opacity="0.15" />
+          <path d="M0,-10 A10,10 0 0,1 8.66,5 L0,0 Z" fill={color} />
+          <path d="M8.66,5 A10,10 0 0,1 -5,8.66 L0,0 Z" fill={color} opacity="0.6" />
+        </g>
+      ) : type === 'scatter' ? (
+        <>
+          <circle cx="8" cy="16" r="2" fill={color} opacity="0.6" />
+          <circle cx="16" cy="8" r="2" fill={color} />
+          <circle cx="24" cy="14" r="2" fill={color} opacity="0.7" />
+          <circle cx="32" cy="6" r="2" fill={color} opacity="0.8" />
+        </>
+      ) : type === 'table' ? (
+        <>
+          <rect x="3" y="2" width="34" height="3" rx="0.5" fill={color} opacity="0.25" />
+          <rect x="3" y="7" width="34" height="2" rx="0.5" fill="#E5E7EB" />
+          <rect x="3" y="11" width="34" height="2" rx="0.5" fill="#E5E7EB" />
+          <rect x="3" y="15" width="34" height="2" rx="0.5" fill="#E5E7EB" />
+          <rect x="3" y="19" width="34" height="2" rx="0.5" fill="#E5E7EB" />
+        </>
+      ) : type === 'heatmap' ? (
+        <>
+          {[0,1,2].map(r => [0,1,2,3].map(c => (
+            <rect key={`${r}-${c}`} x={3 + c * 9} y={2 + r * 7} width="8" height="6" rx="1"
+              fill={color} opacity={0.2 + Math.random() * 0.6} />
+          )))}
+        </>
+      ) : type === 'funnel' ? (
+        <>
+          <rect x="4" y="2" width="32" height="5" rx="1" fill={color} />
+          <rect x="8" y="9" width="24" height="5" rx="1" fill={color} opacity="0.7" />
+          <rect x="12" y="16" width="16" height="5" rx="1" fill={color} opacity="0.4" />
+        </>
+      ) : (
+        /* Default: bar chart (also handles bar_horizontal, bar_stacked, histogram, combo) */
+        <>
+          <rect x="3" y="14" width="5" height="8" rx="1" fill={color} opacity="0.6" />
+          <rect x="10" y="8" width="5" height="14" rx="1" fill={color} opacity="0.8" />
+          <rect x="17" y="11" width="5" height="11" rx="1" fill={color} opacity="0.65" />
+          <rect x="24" y="4" width="5" height="18" rx="1" fill={color} />
+          <rect x="31" y="9" width="5" height="13" rx="1" fill={color} opacity="0.7" />
+        </>
+      )}
+    </svg>
+  )
+}
+
+// Proportional mini layout preview of the dashboard
+function MiniDashboardPreview({ widgets }: { widgets: DashboardWidget[] }) {
+  if (!widgets?.length) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <LayoutGrid size={32} className="text-text-light" />
+      </div>
+    )
+  }
+
+  const maxY = Math.max(...widgets.map(w => (w.grid_y ?? 0) + (w.grid_h ?? 4)), 1)
+
+  return (
+    <div className="relative w-full h-full p-1">
+      {widgets.slice(0, 12).map((w, i) => {
+        const gx = w.grid_x ?? (i % 2) * 6
+        const gy = w.grid_y ?? Math.floor(i / 2) * 4
+        const gw = w.grid_w ?? w.width ?? 6
+        const gh = w.grid_h ?? 4
+        const type = w.chart_type || w.type || 'bar'
+        const color = CHART_COLORS[i % CHART_COLORS.length]
+
+        return (
+          <div
+            key={i}
+            className="absolute rounded-sm bg-white overflow-hidden"
+            style={{
+              left: `${(gx / 12) * 100}%`,
+              top: `${(gy / maxY) * 100}%`,
+              width: `${(gw / 12) * 100}%`,
+              height: `${(gh / maxY) * 100}%`,
+              padding: '2px',
+              boxShadow: '0 0 0 0.5px rgba(0,0,0,0.1)',
+            }}
+          >
+            <MiniChartSvg type={type} color={color} />
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function DashboardList() {
@@ -93,37 +202,26 @@ export default function DashboardList() {
             return (
               <div
                 key={d.id}
+                onClick={() => navigate(`/tableros/saved/${d.id}`)}
                 onMouseEnter={() => setHoveredId(d.id)}
                 onMouseLeave={() => setHoveredId(null)}
                 className="card overflow-hidden cursor-pointer hover:shadow-card-hover transition-all relative"
               >
-                {/* Thumbnail area — mini preview of widget types */}
-                <div className="bg-surface p-4 h-36 relative overflow-hidden">
-                  {widgetCount > 0 ? (
-                    <div className="grid grid-cols-3 gap-2 h-full">
-                      {(d.layout || []).slice(0, 6).map((w, i) => (
-                        <div key={i} className="bg-white rounded-btn shadow-sm flex items-center justify-center p-1">
-                          <MiniChart type={w.type || w.chart_type || 'bar'} index={i} />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-full">
-                      <LayoutGrid size={32} className="text-text-light" />
-                    </div>
-                  )}
+                {/* Thumbnail area — proportional mini preview of dashboard layout */}
+                <div className="bg-surface h-40 relative overflow-hidden">
+                  <MiniDashboardPreview widgets={d.layout || []} />
 
                   {/* Hover overlay with actions */}
                   {isHovered && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center gap-3 animate-fade-in">
                       <button
-                        onClick={() => navigate(`/tableros/saved/${d.id}`)}
+                        onClick={e => { e.stopPropagation(); navigate(`/tableros/saved/${d.id}`) }}
                         className="bg-white text-text-dark px-4 py-2 rounded-btn text-sm font-medium flex items-center gap-1.5 hover:bg-gray-50 transition-colors"
                       >
                         <Eye size={14} /> Ver
                       </button>
                       <button
-                        onClick={() => navigate(`/tableros/nuevo?edit=${d.id}`)}
+                        onClick={e => { e.stopPropagation(); navigate(`/tableros/nuevo?edit=${d.id}`) }}
                         className="bg-primary text-white px-4 py-2 rounded-btn text-sm font-medium flex items-center gap-1.5 hover:bg-primary-dark transition-colors"
                       >
                         <Pencil size={14} /> Editar

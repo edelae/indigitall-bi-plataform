@@ -18,6 +18,7 @@ interface Props {
   yLabel?: string
   showLegend?: boolean
   onClickPoint?: (point: Record<string, any>) => void
+  fillContainer?: boolean
 }
 
 const LABELS: Record<string, string> = {
@@ -33,11 +34,12 @@ function getLabel(col: string): string {
   return LABELS[lower] || col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-export default function ChartWidget({ data, columns, chartType, height = 300, colors, xLabel, yLabel, showLegend = true, onClickPoint }: Props) {
+export default function ChartWidget({ data, columns, chartType, height = 300, colors, xLabel, yLabel, showLegend = true, onClickPoint, fillContainer }: Props) {
   const xKey = columns[0]
   const yKey = columns.length > 1 ? columns[1] : columns[0]
   const yKeys = columns.slice(1)
   const palette = colors || CHART_COLORS
+  const chartHeight: number | string = fillContainer ? '100%' : height
 
   const processedData = useMemo(() => {
     return data.map(row => {
@@ -89,7 +91,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // PIE
   if (chartType === 'pie') {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <PieChart>
           <Pie
             data={processedData}
@@ -97,7 +99,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
             nameKey={xKey}
             cx="50%"
             cy="50%"
-            outerRadius={height / 3}
+            outerRadius="38%"
             label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
             labelLine={{ stroke: '#A0A3BD' }}
           >
@@ -115,7 +117,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // LINE
   if (chartType === 'line') {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <LineChart data={processedData} onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} />
@@ -133,7 +135,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // AREA
   if (chartType === 'area') {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <AreaChart data={processedData} onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis dataKey={xKey} {...commonAxisProps} />
@@ -148,7 +150,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // AREA STACKED
   if (chartType === 'area_stacked') {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <AreaChart data={processedData} onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis dataKey={xKey} {...commonAxisProps} />
@@ -166,7 +168,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // HORIZONTAL BAR
   if (chartType === 'bar_horizontal') {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <BarChart data={processedData} layout="vertical" onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis type="number" {...commonAxisProps} />
@@ -181,7 +183,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // STACKED BAR
   if (chartType === 'bar_stacked') {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <BarChart data={processedData} onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} />
@@ -199,7 +201,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // SCATTER
   if (chartType === 'scatter') {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <ScatterChart onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis dataKey={xKey} {...commonAxisProps} name={getLabel(xKey)} />
@@ -214,7 +216,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // COMBO (bar + line)
   if (chartType === 'combo' && yKeys.length >= 2) {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <ComposedChart data={processedData} onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} />
@@ -236,7 +238,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
       fill: palette[i % palette.length],
     }))
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <FunnelChart>
           <Tooltip {...tooltipStyle} />
           <Funnel dataKey="value" data={funnelData} isAnimationActive>
@@ -255,7 +257,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
       fill: palette[i % palette.length],
     }))
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <Treemap
           data={treemapData}
           dataKey="size"
@@ -292,7 +294,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
     }
 
     return (
-      <div style={{ width: '100%', height, overflow: 'auto' }}>
+      <div style={{ width: '100%', height: fillContainer ? '100%' : height, overflow: 'auto' }}>
         <svg width={Math.max(totalW, 300)} height={Math.max(cellH * (yValues.length + 1) + 40, height)}>
           {/* X axis labels */}
           {xValues.map((xv, xi) => (
@@ -328,8 +330,8 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
       { name: '', value: maxVal - val },
     ]
     return (
-      <div className="flex flex-col items-center justify-center" style={{ height }}>
-        <ResponsiveContainer width="100%" height={height * 0.7}>
+      <div className="flex flex-col items-center justify-center" style={{ height: fillContainer ? '100%' : height }}>
+        <ResponsiveContainer width="100%" height={fillContainer ? '70%' : height * 0.7}>
           <PieChart>
             <Pie
               data={gaugeData}
@@ -338,8 +340,8 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
               endAngle={0}
               cx="50%"
               cy="80%"
-              outerRadius={height / 3}
-              innerRadius={height / 4}
+              outerRadius="38%"
+              innerRadius="28%"
             >
               <Cell fill={palette[0]} />
               <Cell fill="#E4E4E7" />
@@ -358,7 +360,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   // Multi-Y (bivariate): grouped bars when 3+ columns
   if (yKeys.length >= 2) {
     return (
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <BarChart data={processedData} onClick={handleClick}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
           <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} label={xAxisLabel} />
@@ -374,7 +376,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
   }
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <ResponsiveContainer width="100%" height={chartHeight}>
       <BarChart data={processedData} onClick={handleClick}>
         <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
         <XAxis dataKey={xKey} {...commonAxisProps} angle={rotateX ? -45 : 0} textAnchor={rotateX ? 'end' : 'middle'} height={rotateX ? 60 : 30} label={xAxisLabel} />
