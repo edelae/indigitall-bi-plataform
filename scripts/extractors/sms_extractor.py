@@ -30,7 +30,6 @@ class SMSExtractor(BaseExtractor):
         self._extract_campaign_stats_detail(app_id, campaign_ids)
         self._extract_app_stats(app_id)
         self._extract_sendings(app_id)
-        self._extract_sending_details(app_id)
         self._extract_contacts(app_id)
         self._extract_topics(app_id)
 
@@ -119,16 +118,17 @@ class SMSExtractor(BaseExtractor):
         print(f"    sms/stats/application: {total_rows} daily rows")
 
     # ------------------------------------------------------------------
-    # Sendings (messages dispatched)
+    # Sendings (messages dispatched) — FULL extraction, no cap
     # ------------------------------------------------------------------
 
-    def _extract_sendings(self, app_id: str, max_records: int = 2000):
-        """GET /v2/sms/send — paginated list of sendings (capped for structure inspection)."""
+    def _extract_sendings(self, app_id: str):
+        """GET /v2/sms/send — paginated list of ALL sendings."""
         page = 1
         page_size = 100
         total_fetched = 0
+        api_total = 0
 
-        while total_fetched < max_records:
+        while True:
             data = self.client.get(
                 "/v2/sms/send",
                 params={
@@ -146,56 +146,31 @@ class SMSExtractor(BaseExtractor):
             if not sendings:
                 break
 
+            api_total = data.get("count", api_total)
             self._store_raw(app_id, "/v2/sms/send", data)
             total_fetched += len(sendings)
             page += 1
 
+            if total_fetched % 10000 == 0:
+                print(f"    sms/send: {total_fetched:,} / {api_total:,} fetched...")
+
             if len(sendings) < page_size:
                 break
 
-        api_total = data.get("count", 0) if data else 0
-        print(f"    sms/send: {total_fetched} fetched (API total: {api_total:,})")
-
-    def _extract_sending_details(self, app_id: str, sample_size: int = 5):
-        """GET /v2/sms/send/{id} — fetch detail for a sample of sendings.
-
-        Includes campaignSnapshot with full campaign config at send time.
-        """
-        first_page = self.client.get(
-            "/v2/sms/send",
-            params={"applicationId": app_id, "limit": sample_size, "page": 1},
-            application_id=app_id,
-        )
-        if first_page is None:
-            return
-
-        sendings = first_page.get("data", {}).get("sendings", [])
-        fetched = 0
-        for s in sendings[:sample_size]:
-            sid = s.get("id")
-            if sid is None:
-                continue
-            detail = self.client.get(
-                f"/v2/sms/send/{sid}",
-                application_id=app_id,
-            )
-            if detail is not None:
-                self._store_raw(app_id, f"/v2/sms/send/{sid}", detail)
-                fetched += 1
-
-        print(f"    sms/send/{{id}}: {fetched} sending details")
+        print(f"    sms/send: {total_fetched:,} fetched (API total: {api_total:,})")
 
     # ------------------------------------------------------------------
-    # Contacts
+    # Contacts — FULL extraction, no cap
     # ------------------------------------------------------------------
 
-    def _extract_contacts(self, app_id: str, max_records: int = 2000):
-        """GET /v2/sms/contact — paginated SMS contacts (capped for inspection)."""
+    def _extract_contacts(self, app_id: str):
+        """GET /v2/sms/contact — paginated list of ALL SMS contacts."""
         page = 1
         page_size = 100
         total_fetched = 0
+        api_total = 0
 
-        while total_fetched < max_records:
+        while True:
             data = self.client.get(
                 "/v2/sms/contact",
                 params={
@@ -213,15 +188,18 @@ class SMSExtractor(BaseExtractor):
             if not contacts:
                 break
 
+            api_total = data.get("count", api_total)
             self._store_raw(app_id, "/v2/sms/contact", data)
             total_fetched += len(contacts)
             page += 1
 
+            if total_fetched % 10000 == 0:
+                print(f"    sms/contact: {total_fetched:,} / {api_total:,} fetched...")
+
             if len(contacts) < page_size:
                 break
 
-        api_total = data.get("count", 0) if data else 0
-        print(f"    sms/contact: {total_fetched} fetched (API total: {api_total:,})")
+        print(f"    sms/contact: {total_fetched:,} fetched (API total: {api_total:,})")
 
     # ------------------------------------------------------------------
     # Topics

@@ -67,3 +67,27 @@ models:
       - name: sending_id
         tests: [not_null, unique]
 
+  - name: stg_sms_campaigns
+    description: Deduplicated SMS campaigns from v2 API
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: campaign_id
+        tests: [not_null, unique]
+
+  - name: stg_sms_contacts
+    description: Deduplicated SMS contacts from v2 API
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: contact_id
+        tests: [not_null, unique]
+
+  - name: stg_sms_daily_stats
+    description: Daily SMS aggregate stats from v2 API with derived rates
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+

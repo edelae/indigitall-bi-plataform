@@ -48,3 +48,19 @@ models:
         tests: [not_null]
       - name: agent_id
         tests: [not_null]
+
+  - name: fct_sms_daily
+    description: Daily SMS metrics combining API stats and sending-level data
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+
+  - name: dim_sms_campaigns
+    description: SMS campaign dimension with enriched metrics from sendings
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: campaign_id
+        tests: [not_null]

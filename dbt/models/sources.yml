@@ -104,3 +104,27 @@ sources:
             tests: [not_null]
           - name: sending_id
             tests: [not_null]
+
+      - name: sms_campaigns
+        description: SMS campaigns from Indigitall API v2 (/v2/sms/campaign)
+        columns:
+          - name: tenant_id
+            tests: [not_null]
+          - name: campaign_id
+            tests: [not_null]
+
+      - name: sms_contacts
+        description: SMS contacts from Indigitall API v2 (/v2/sms/contact)
+        columns:
+          - name: tenant_id
+            tests: [not_null]
+          - name: contact_id
+            tests: [not_null]
+
+      - name: sms_daily_stats
+        description: Daily SMS stats from Indigitall API v2 (/v2/sms/stats/application)
+        columns:
+          - name: tenant_id
+            tests: [not_null]
+          - name: date
+            tests: [not_null]

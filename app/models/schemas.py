@@ -339,6 +339,76 @@ class ToquesUsuario(Base):
 
 
 # ============================================================
+# SMS Domain (v2 API)
+# ============================================================
+
+class SmsCampaign(Base):
+    """SMS campaigns from /v2/sms/campaign."""
+    __tablename__ = "sms_campaigns"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Text, nullable=False)
+    campaign_id = Column(String(100), nullable=False)
+    application_id = Column(String(100), nullable=False)
+    name = Column(String(255))
+    status = Column(String(30))
+    sending_type = Column(String(30))
+    total_sendings = Column(Integer, nullable=False, default=0)
+    total_contacts = Column(Integer, nullable=False, default=0)
+    created_at = Column(TIMESTAMP(timezone=True))
+    updated_at = Column(TIMESTAMP(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "campaign_id", name="uq_sms_campaigns_tenant_cid"),
+        Index("idx_sms_campaigns_app", "tenant_id", "application_id"),
+    )
+
+
+class SmsContact(Base):
+    """SMS contacts from /v2/sms/contact."""
+    __tablename__ = "sms_contacts"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Text, nullable=False)
+    contact_id = Column(String(100), nullable=False)
+    application_id = Column(String(100), nullable=False)
+    phone = Column(String(50), nullable=False)
+    country_code = Column(String(10))
+    created_at = Column(TIMESTAMP(timezone=True))
+    updated_at = Column(TIMESTAMP(timezone=True))
+    total_sendings = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "contact_id", name="uq_sms_contacts_tenant_cid"),
+        Index("idx_sms_contacts_phone", "tenant_id", "phone"),
+        Index("idx_sms_contacts_app", "tenant_id", "application_id"),
+    )
+
+
+class SmsDailyStat(Base):
+    """Daily SMS aggregate stats from /v2/sms/stats/application."""
+    __tablename__ = "sms_daily_stats"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Text, nullable=False)
+    application_id = Column(String(100), nullable=False)
+    date = Column(Date, nullable=False)
+    total_sent = Column(Integer, nullable=False, default=0)
+    total_delivered = Column(Integer, nullable=False, default=0)
+    total_rejected = Column(Integer, nullable=False, default=0)
+    total_chunks = Column(Integer, nullable=False, default=0)
+    total_clicks = Column(Integer, nullable=False, default=0)
+    unique_contacts = Column(Integer, nullable=False, default=0)
+    total_cost = Column(Numeric(12, 2), default=0)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "application_id", "date",
+                         name="uq_sms_daily_stats_composite"),
+        Index("idx_sms_daily_stats_date", "tenant_id", "date"),
+    )
+
+
+# ============================================================
 # Application Domain
 # ============================================================
 
