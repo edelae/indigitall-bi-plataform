@@ -22,6 +22,7 @@ class ExtractionSettings(BaseSettings):
 
     # Extraction limits
     EXTRACTION_DAYS_BACK: int = 90
+    EXTRACTION_INCREMENTAL_DAYS: int = 7  # For incremental mode (overridden by cursors)
     EXTRACTION_PAGE_LIMIT: int = 50
     EXTRACTION_MAX_RECORDS: int = 100  # page size (API max per request)
 

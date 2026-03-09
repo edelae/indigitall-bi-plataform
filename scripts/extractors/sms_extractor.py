@@ -11,13 +11,21 @@ Confirmed v2 endpoints (10):
   GET /v2/sms/contact?applicationId=X&limit=N&page=P               → SMS contacts (413K)
   GET /v2/sms/contact/{id}                                          → contact detail
   GET /v2/sms/topic?applicationId=X                                 → subscription topics
+
+Incremental mode:
+  - sms_sendings cursor: ISO date of last extraction → only fetch page 1..N until
+    we hit records older than cursor (API returns newest first)
+  - stats: re-extract last 7 days only (overlap for late data)
+  - contacts: always full (small, ~4 min)
+  - campaigns: always full (tiny)
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from scripts.extractors.base_extractor import BaseExtractor
 
 MAX_STATS_WINDOW_DAYS = 99
+INCREMENTAL_STATS_DAYS = 7  # Only re-extract last 7 days of stats in incremental mode
 
 
 class SMSExtractor(BaseExtractor):
@@ -26,9 +34,9 @@ class SMSExtractor(BaseExtractor):
 
     def _extract_for_app(self, app_id: str, app_meta: dict):
         campaign_ids = self._extract_campaigns(app_id)
+        self._extract_app_stats(app_id)
         self._extract_campaign_stats_list(app_id)
         self._extract_campaign_stats_detail(app_id, campaign_ids)
-        self._extract_app_stats(app_id)
         self._extract_sendings(app_id)
         self._extract_contacts(app_id)
         self._extract_topics(app_id)
@@ -96,9 +104,25 @@ class SMSExtractor(BaseExtractor):
         print(f"    sms/stats/campaign/{{id}}: {total_rows} rows across {len(campaign_ids)} campaigns")
 
     def _extract_app_stats(self, app_id: str):
-        """GET /v2/sms/stats/application — daily aggregate stats (max 99d windows)."""
+        """GET /v2/sms/stats/application — daily aggregate stats.
+
+        Incremental: only re-extract last 7 days of stats.
+        """
+        # Incremental: narrow the date range for stats
+        stats_from = self.date_from
+        cursor = self._get_cursor("sms_stats")
+        if cursor and not self.full_refresh:
+            try:
+                cursor_date = date.fromisoformat(cursor)
+                stats_from = cursor_date - timedelta(days=INCREMENTAL_STATS_DAYS)
+                if stats_from < self.date_from:
+                    stats_from = self.date_from
+                print(f"    sms/stats: incremental from {stats_from}")
+            except ValueError:
+                pass
+
         total_rows = 0
-        for start, end in self._date_windows():
+        for start, end in self._date_windows(override_from=stats_from):
             data = self.client.get(
                 "/v2/sms/stats/application",
                 params={
@@ -115,6 +139,7 @@ class SMSExtractor(BaseExtractor):
             total_rows += len(rows)
             self._store_raw(app_id, "/v2/sms/stats/application", data)
 
+        self._update_cursor("sms_stats", self.date_to.isoformat())
         print(f"    sms/stats/application: {total_rows} daily rows")
 
     # ------------------------------------------------------------------
@@ -122,11 +147,28 @@ class SMSExtractor(BaseExtractor):
     # ------------------------------------------------------------------
 
     def _extract_sendings(self, app_id: str):
-        """GET /v2/sms/send — paginated list of ALL sendings (page_size=1000 for speed)."""
+        """GET /v2/sms/send — paginated sendings.
+
+        Full mode: fetches ALL sendings (page_size=1000).
+        Incremental mode: fetches newest pages until we hit records older than cursor.
+        The API returns newest sendings first (sorted by sentAt DESC).
+        """
         page = 1
         page_size = 1000  # v2 API accepts up to 1000
         total_fetched = 0
         api_total = 0
+
+        # Incremental: stop when we hit old records
+        cutoff_date = None
+        cursor = self._get_cursor("sms_sendings")
+        if cursor and not self.full_refresh:
+            try:
+                cutoff_date = date.fromisoformat(cursor)
+                # 1-day overlap for late-arriving records
+                cutoff_date = cutoff_date - timedelta(days=1)
+                print(f"    sms/send: incremental, cutoff={cutoff_date}")
+            except ValueError:
+                pass
 
         while True:
             data = self.client.get(
@@ -154,9 +196,23 @@ class SMSExtractor(BaseExtractor):
             if total_fetched % 50000 == 0:
                 print(f"    sms/send: {total_fetched:,} / {api_total:,} fetched...")
 
+            # Incremental: check if oldest record in this page is before cutoff
+            if cutoff_date:
+                oldest_sent = sendings[-1].get("sentAt", "")
+                if oldest_sent:
+                    try:
+                        oldest_date = date.fromisoformat(oldest_sent[:10])
+                        if oldest_date < cutoff_date:
+                            print(f"    sms/send: reached cutoff ({oldest_date} < {cutoff_date})")
+                            break
+                    except ValueError:
+                        pass
+
             if len(sendings) < page_size:
                 break
 
+        # Save cursor for next incremental run
+        self._update_cursor("sms_sendings", self.date_to.isoformat())
         print(f"    sms/send: {total_fetched:,} fetched (API total: {api_total:,})")
 
     # ------------------------------------------------------------------
@@ -164,13 +220,27 @@ class SMSExtractor(BaseExtractor):
     # ------------------------------------------------------------------
 
     def _extract_contacts(self, app_id: str):
-        """GET /v2/sms/contact — paginated list of ALL SMS contacts (page_size=1000)."""
+        """GET /v2/sms/contact — paginated SMS contacts.
+
+        In incremental mode, only fetches first few pages (new contacts appear first).
+        In full mode, fetches ALL contacts.
+        """
         page = 1
-        page_size = 1000  # v2 API accepts up to 1000
+        page_size = 1000
         total_fetched = 0
         api_total = 0
 
+        # Incremental: limit to first 10 pages (~10K newest contacts)
+        max_pages = None
+        cursor = self._get_cursor("sms_contacts")
+        if cursor and not self.full_refresh:
+            max_pages = 10
+            print(f"    sms/contact: incremental (max {max_pages} pages of new contacts)")
+
         while True:
+            if max_pages and page > max_pages:
+                break
+
             data = self.client.get(
                 "/v2/sms/contact",
                 params={
@@ -199,6 +269,7 @@ class SMSExtractor(BaseExtractor):
             if len(contacts) < page_size:
                 break
 
+        self._update_cursor("sms_contacts", self.date_to.isoformat())
         print(f"    sms/contact: {total_fetched:,} fetched (API total: {api_total:,})")
 
     # ------------------------------------------------------------------
@@ -223,9 +294,9 @@ class SMSExtractor(BaseExtractor):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _date_windows(self):
+    def _date_windows(self, override_from: date | None = None):
         """Yield (start, end) date tuples in <=99-day windows covering the extraction range."""
-        current = self.date_from
+        current = override_from or self.date_from
         while current < self.date_to:
             window_end = min(current + timedelta(days=MAX_STATS_WINDOW_DAYS - 1), self.date_to)
             yield current, window_end
