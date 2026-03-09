@@ -1,4 +1,5 @@
 """Dashboard CRUD."""
+import math
 import logging
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
@@ -9,6 +10,19 @@ from app.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _sanitize(obj: Any) -> Any:
+    """Replace NaN / Infinity floats with None so JSON serialization succeeds."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize(v) for v in obj]
+    return obj
 
 
 class SaveDashboardRequest(BaseModel):
@@ -40,7 +54,7 @@ async def list_dashboards(
         for key in ("created_at", "updated_at"):
             if d.get(key):
                 d[key] = str(d[key])
-    return result
+    return _sanitize(result)
 
 
 @router.get("/{dashboard_id}")
@@ -52,7 +66,7 @@ async def get_dashboard(dashboard_id: int, tenant: Optional[str] = None):
     for key in ("created_at", "updated_at"):
         if dashboard.get(key):
             dashboard[key] = str(dashboard[key])
-    return dashboard
+    return _sanitize(dashboard)
 
 
 @router.post("")
