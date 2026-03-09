@@ -619,7 +619,7 @@ export default function DashboardBuilder() {
           {widgets.length > 0 && canvasWidth > 0 && (
             <Responsive
               width={canvasWidth}
-              layouts={{ lg: gridLayout }}
+              layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout, xs: gridLayout }}
               breakpoints={GRID_BREAKPOINTS}
               cols={GRID_COLS}
               rowHeight={GRID_ROW_HEIGHT}

@@ -173,7 +173,7 @@ class StorageService:
             clauses.append(t.c.name.ilike(f"%{search}%"))
 
         stmt = (
-            select(t.c.id, t.c.name, t.c.description, t.c.tags,
+            select(t.c.id, t.c.name, t.c.description, t.c.layout, t.c.tags,
                    t.c.is_favorite, t.c.is_default, t.c.created_by,
                    t.c.created_at, t.c.updated_at)
             .where(and_(*clauses))

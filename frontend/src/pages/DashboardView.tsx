@@ -187,7 +187,7 @@ export default function DashboardView() {
         ) : containerWidth > 0 && (
           <Responsive
             width={containerWidth}
-            layouts={{ lg: gridLayout }}
+            layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout, xs: gridLayout }}
             breakpoints={GRID_BREAKPOINTS}
             cols={GRID_COLS}
             rowHeight={GRID_ROW_HEIGHT}
