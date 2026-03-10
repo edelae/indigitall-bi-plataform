@@ -13,9 +13,9 @@ const ThemeContext = createContext<ThemeCtx>({ theme: 'light', toggle: () => {},
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === 'undefined') return 'light'
-    const stored = localStorage.getItem('theme') as Theme | null
-    if (stored) return stored
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    const stored = localStorage.getItem('theme')
+    // Only apply dark if explicitly saved as 'dark'; default to light
+    return stored === 'dark' ? 'dark' : 'light'
   })
 
   useEffect(() => {
@@ -44,9 +44,16 @@ export function useTheme() {
 export function useChartTheme() {
   const { isDark } = useTheme()
   return {
-    gridColor: isDark ? '#374151' : '#E4E4E7',
+    gridColor: isDark ? '#2D3144' : '#E4E4E7',
     textColor: isDark ? '#9CA3AF' : '#6E7191',
-    tooltipBg: isDark ? '#111827' : '#1A1A2E',
-    cardBg: isDark ? '#1F2937' : '#FFFFFF',
+    tooltipBg: isDark ? '#0F1117' : '#1A1A2E',
+    cardBg: isDark ? '#1A1D27' : '#FFFFFF',
+    bgPrimary: isDark ? '#0F1117' : '#F3F4F6',
+    bgCard: isDark ? '#1A1D27' : '#FFFFFF',
+    bgInput: isDark ? '#242736' : '#FFFFFF',
+    borderColor: isDark ? '#2D3144' : '#E5E7EB',
+    textPrimary: isDark ? '#F3F4F6' : '#111827',
+    textSecondary: isDark ? '#9CA3AF' : '#6B7280',
+    textMuted: isDark ? '#6B7280' : '#9CA3AF',
   }
 }

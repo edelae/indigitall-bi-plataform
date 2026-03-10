@@ -31,8 +31,13 @@ ALLOWED_SCHEMAS = ["public", "public_marts"]
 class SchemaService:
     """Introspect the Postgres schema for the Data Explorer."""
 
-    def list_tables(self) -> List[Dict[str, Any]]:
-        """List all application tables with row counts."""
+    def list_tables(self, live_counts: bool = False) -> List[Dict[str, Any]]:
+        """List all application tables with row counts.
+
+        Args:
+            live_counts: If True, use COUNT(*) for exact row counts instead of
+                         pg_stat_user_tables estimates (slower but accurate).
+        """
         query = text(r"""
             SELECT
                 t.table_name,
@@ -50,13 +55,22 @@ class SchemaService:
         """)
         with engine.connect() as conn:
             rows = conn.execute(query).fetchall()
-        return [
-            {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public"}
-            for r in rows
-            if r.table_name in ALLOWED_TABLES
-        ]
+            tables = [
+                {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public"}
+                for r in rows
+                if r.table_name in ALLOWED_TABLES
+            ]
+            if live_counts:
+                for t in tables:
+                    try:
+                        qualified = f'"public"."{t["table_name"]}"'
+                        count = conn.execute(text(f"SELECT COUNT(*) FROM {qualified}")).scalar()
+                        t["row_count"] = count or 0
+                    except Exception:
+                        logger.warning("Live count failed for %s", t["table_name"])
+        return tables
 
-    def list_analytics_tables(self) -> List[Dict[str, Any]]:
+    def list_analytics_tables(self, live_counts: bool = False) -> List[Dict[str, Any]]:
         """List analytics schema tables (public_marts) with row counts."""
         query = text("""
             SELECT
@@ -75,10 +89,19 @@ class SchemaService:
         try:
             with engine.connect() as conn:
                 rows = conn.execute(query).fetchall()
-            return [
-                {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public_marts"}
-                for r in rows
-            ]
+                tables = [
+                    {"table_name": r.table_name, "row_count": r.row_count, "size": r.size, "schema": "public_marts"}
+                    for r in rows
+                ]
+                if live_counts:
+                    for t in tables:
+                        try:
+                            qualified = f'"public_marts"."{t["table_name"]}"'
+                            count = conn.execute(text(f"SELECT COUNT(*) FROM {qualified}")).scalar()
+                            t["row_count"] = count or 0
+                        except Exception:
+                            logger.warning("Live count failed for public_marts.%s", t["table_name"])
+            return tables
         except Exception as e:
             logger.warning("Failed to list analytics tables: %s", e)
             return []
@@ -173,15 +196,15 @@ class SchemaService:
             for r in rows
         ]
 
-    def list_all_tables_with_columns(self) -> List[Dict[str, Any]]:
+    def list_all_tables_with_columns(self, live_counts: bool = False) -> List[Dict[str, Any]]:
         """List all allowed tables with their columns (public + analytics)."""
         result = []
         # Public schema tables
-        for t in self.list_tables():
+        for t in self.list_tables(live_counts=live_counts):
             cols = self.get_table_schema(t["table_name"], "public")
             result.append({**t, "columns": cols})
         # Analytics schema tables
-        for t in self.list_analytics_tables():
+        for t in self.list_analytics_tables(live_counts=live_counts):
             cols = self.get_table_schema(t["table_name"], "public_marts")
             result.append({**t, "columns": cols})
         return result

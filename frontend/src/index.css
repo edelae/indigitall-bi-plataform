@@ -2,9 +2,54 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══ CSS Custom Properties ═══ */
+:root {
+  --bg-primary: #F3F4F6;
+  --bg-card: #FFFFFF;
+  --bg-input: #FFFFFF;
+  --bg-surface: #F5F7FA;
+  --bg-nav: #FFFFFF;
+  --border: #E5E7EB;
+  --border-light: #F0F0F5;
+  --text-primary: #111827;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --text-light: #D1D5DB;
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-hover: 0 4px 12px rgba(0,0,0,0.12);
+  --chart-grid: #E4E4E7;
+  --chart-text: #6E7191;
+  --tooltip-bg: #1A1A2E;
+  --table-stripe: rgba(249,250,251,0.5);
+  --table-header: #F9FAFB;
+}
+
+.dark {
+  --bg-primary: #0F1117;
+  --bg-card: #1A1D27;
+  --bg-input: #242736;
+  --bg-surface: #1A1D27;
+  --bg-nav: #0F1117;
+  --border: #2D3144;
+  --border-light: #242736;
+  --text-primary: #F3F4F6;
+  --text-secondary: #9CA3AF;
+  --text-muted: #6B7280;
+  --text-light: #4B5563;
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-hover: 0 4px 12px rgba(0,0,0,0.4);
+  --chart-grid: #2D3144;
+  --chart-text: #9CA3AF;
+  --tooltip-bg: #0F1117;
+  --table-stripe: rgba(36,39,54,0.5);
+  --table-header: #242736;
+}
+
 @layer base {
   body {
-    @apply text-text-dark;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   }
 }
 
@@ -16,9 +61,12 @@
   }
 
   .btn-secondary {
-    @apply bg-white text-text-dark border border-border px-4 py-2 rounded-btn font-medium
-           hover:bg-surface transition-colors duration-150;
+    @apply px-4 py-2 rounded-btn font-medium transition-colors duration-150;
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
   }
+  .btn-secondary:hover { background-color: var(--bg-surface); }
 
   .btn-danger {
     @apply bg-red-500 text-white px-4 py-2 rounded-btn font-medium
@@ -26,24 +74,33 @@
   }
 
   .btn-ghost {
-    @apply text-text-muted px-3 py-2 rounded-btn font-medium
-           hover:bg-surface transition-colors duration-150;
+    @apply px-3 py-2 rounded-btn font-medium transition-colors duration-150;
+    color: var(--text-secondary);
   }
+  .btn-ghost:hover { background-color: var(--bg-surface); }
 
   .btn-icon {
-    @apply p-2 rounded-btn text-text-muted hover:bg-surface
-           transition-colors duration-150;
+    @apply p-2 rounded-btn transition-colors duration-150;
+    color: var(--text-secondary);
   }
+  .btn-icon:hover { background-color: var(--bg-surface); }
 
   .card {
-    @apply bg-white rounded-card shadow-card border border-border-light;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-card);
   }
 
   .input {
-    @apply w-full px-3 py-2 border border-border rounded-btn text-sm
+    @apply w-full px-3 py-2 rounded-btn text-sm
            focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary
-           placeholder:text-text-light transition-colors;
+           transition-colors;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
   }
+  .input::placeholder { color: var(--text-muted); }
 
   .badge {
     @apply inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium;
@@ -55,63 +112,40 @@
   .badge-info { @apply bg-primary-light/10 text-primary; }
 }
 
-/* Dark mode overrides */
-.dark body { background-color: #111827; color: #E5E7EB; }
-.dark .card { background-color: #1F2937; border-color: #374151; }
-.dark .input { background-color: #1F2937; border-color: #374151; color: #E5E7EB; }
-.dark .btn-secondary { background-color: #1F2937; border-color: #374151; color: #E5E7EB; }
-.dark nav { background-color: #111827; border-color: #1F2937; }
-.dark .badge-primary { background-color: rgba(30, 136, 229, 0.2); }
-.dark .badge-success { background-color: rgba(118, 192, 67, 0.2); }
-.dark .badge-warning { background-color: rgba(255, 193, 7, 0.2); }
-.dark .badge-info { background-color: rgba(66, 165, 245, 0.2); }
-.dark ::-webkit-scrollbar-thumb { background: #374151; }
-.dark ::-webkit-scrollbar-thumb:hover { background: #4B5563; }
-
-/* Custom scrollbar */
+/* ═══ Scrollbar ═══ */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #E4E4E7; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #A0A3BD; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* React Grid Layout */
-.react-grid-layout {
-  position: relative;
-}
+/* ═══ React Grid Layout ═══ */
+.react-grid-layout { position: relative; }
 .react-grid-item.react-grid-placeholder {
   background: #1E88E5 !important;
   opacity: 0.1 !important;
-  border-radius: 16px !important;
+  border-radius: 12px !important;
 }
 .react-resizable-handle::after {
-  border-right: 2px solid #A0A3BD !important;
-  border-bottom: 2px solid #A0A3BD !important;
+  border-right: 2px solid var(--text-muted) !important;
+  border-bottom: 2px solid var(--text-muted) !important;
 }
-.react-grid-item > .react-resizable-handle {
-  z-index: 10;
-}
+.react-grid-item > .react-resizable-handle { z-index: 10; }
 
-/* Animation */
+/* ═══ Animations ═══ */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
-}
+.animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
 
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.animate-slide-up {
-  animation: slideUp 0.4s ease-out forwards;
-}
+.animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
 }
-.animate-pulse-dot {
-  animation: pulse-dot 1.5s ease-in-out infinite;
-}
+.animate-pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }

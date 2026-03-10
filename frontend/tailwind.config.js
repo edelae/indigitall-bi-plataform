@@ -16,18 +16,25 @@ export default {
         'text-dark': '#1A1A2E',
         'text-muted': '#6E7191',
         'text-light': '#A0A3BD',
+        // Dark mode specific
+        dark: {
+          bg: '#0F1117',
+          card: '#1A1D27',
+          input: '#242736',
+          border: '#2D3144',
+        },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
       },
       borderRadius: {
-        card: '16px',
+        card: '12px',
         btn: '8px',
         pill: '24px',
       },
       boxShadow: {
-        card: '0 4px 24px rgba(0, 0, 0, 0.06)',
-        'card-hover': '0 8px 32px rgba(0, 0, 0, 0.1)',
+        card: '0 1px 3px rgba(0, 0, 0, 0.08)',
+        'card-hover': '0 4px 12px rgba(0, 0, 0, 0.12)',
       },
     },
   },

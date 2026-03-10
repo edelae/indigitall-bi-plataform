@@ -9,10 +9,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <title>inDigitall Analytics</title>
     <script>
-      (function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')})()
+      // Light by default. Only dark if explicitly saved.
+      (function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark')})()
     </script>
   </head>
-  <body class="bg-white dark:bg-gray-900 font-sans text-text-dark dark:text-gray-200 antialiased">
+  <body class="font-sans antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

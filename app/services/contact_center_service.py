@@ -8,7 +8,7 @@ from sqlalchemy import select, func, and_, case, text
 from typing import Optional, Dict, Any
 
 from app.models.database import engine
-from app.models.schemas import ChatConversation
+from app.models.schemas import Agent, ChatConversation
 
 log = logging.getLogger(__name__)
 
@@ -165,12 +165,24 @@ class ContactCenterService:
             row = conn.execute(
                 select(
                     func.count().label("total_conversations"),
-                    func.count(func.distinct(t.c.agent_id)).label("active_agents"),
                     func.avg(t.c.wait_time_seconds).label("avg_frt"),
                     func.avg(t.c.handle_time_seconds).label("avg_handle"),
                     func.count(func.distinct(t.c.contact_id)).label("total_contacts"),
                 ).where(w)
             ).first()
+
+            # Active agents: only those with assigned_at in the date range
+            agent_where = self._tenant_filter(t, tenant_filter)
+            agent_where = and_(agent_where, t.c.agent_id.isnot(None))
+            if start_date and end_date:
+                agent_where = and_(
+                    agent_where,
+                    func.date(t.c.assigned_at) >= start_date,
+                    func.date(t.c.assigned_at) <= end_date,
+                )
+            active_agents = conn.execute(
+                select(func.count(func.distinct(t.c.agent_id))).where(agent_where)
+            ).scalar() or 0
 
             # FCR: contacts with exactly 1 session / total contacts
             fcr_row = conn.execute(
@@ -187,7 +199,7 @@ class ContactCenterService:
         total_convs = row.total_conversations or 0
         return {
             "total_conversations": total_convs,
-            "active_agents": row.active_agents or 0,
+            "active_agents": active_agents,
             "fcr_rate": round(fcr_row / total_contacts * 100, 1) if total_contacts > 0 else 0,
             "avg_frt_seconds": round(float(row.avg_frt or 0), 0),
             "avg_handle_seconds": round(float(row.avg_handle or 0), 0),
@@ -244,22 +256,29 @@ class ContactCenterService:
         end_date: Optional[date_type] = None,
         limit: int = 20,
     ) -> pd.DataFrame:
-        """Expanded agent performance with FRT and handle time."""
+        """Expanded agent performance with FRT and handle time, joined with agents table."""
         t = ChatConversation.__table__
+        a = Agent.__table__
         w = and_(
             self._base_where(t, tenant_filter, start_date, end_date),
             t.c.agent_id.isnot(None),
         )
+        joined = t.outerjoin(
+            a,
+            and_(t.c.agent_id == a.c.agent_id, t.c.tenant_id == a.c.tenant_id),
+        )
         stmt = (
             select(
-                t.c.agent_id,
+                func.coalesce(a.c.agent_email, t.c.agent_id).label("agent_email"),
+                a.c.team,
                 func.count().label("conversations"),
                 func.count(func.distinct(t.c.contact_id)).label("contacts"),
                 func.avg(t.c.wait_time_seconds).label("avg_frt"),
                 func.avg(t.c.handle_time_seconds).label("avg_handle"),
             )
+            .select_from(joined)
             .where(w)
-            .group_by(t.c.agent_id)
+            .group_by(a.c.agent_email, t.c.agent_id, a.c.team)
             .order_by(func.count().desc())
             .limit(limit)
         )
