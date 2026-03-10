@@ -60,7 +60,11 @@ export default function QueryChat() {
           data: query.result_data,
           columns: cols,
           chart_type: chartType,
-          query_details: query.generated_sql ? { sql: query.generated_sql, title: query.name } : null,
+          query_details: (query.generated_sql || query.ai_function) ? {
+            sql: query.generated_sql || undefined,
+            function: query.ai_function || undefined,
+            title: query.name,
+          } : null,
         } : null
 
         if (restoredResult) {
@@ -337,6 +341,23 @@ export default function QueryChat() {
                       legendFontSize={chartConfig.legendFontSize}
                     />
                   </div>
+                )}
+
+                {/* SQL block (visible when query has SQL) */}
+                {lastResult.query_details?.sql && (
+                  <details className="card p-3 mb-4" open>
+                    <summary className="flex items-center gap-2 cursor-pointer text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                      <Code size={13} className="text-primary" />
+                      SQL Ejecutado
+                      {lastResult.query_details?.function && (
+                        <span className="badge badge-primary ml-2 normal-case">{lastResult.query_details.function}</span>
+                      )}
+                    </summary>
+                    <pre className="mt-2 p-3 rounded-btn text-xs overflow-x-auto max-h-48 font-mono whitespace-pre-wrap"
+                      style={{ backgroundColor: 'var(--tooltip-bg)', color: '#D1D5DB' }}>
+                      {lastResult.query_details.sql}
+                    </pre>
+                  </details>
                 )}
 
                 {/* Data table */}
