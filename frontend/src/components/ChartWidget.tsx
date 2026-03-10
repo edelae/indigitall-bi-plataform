@@ -329,51 +329,84 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
     )
   }
 
-  // HEATMAP (rendered as colored grid using ScatterChart)
+  // HEATMAP (rendered as colored grid)
   if (chartType === 'heatmap' && columns.length >= 3) {
     const zKey = columns[2]
-    const xValues = [...new Set(processedData.map(r => String(r[xKey])))]
-    const yValues = [...new Set(processedData.map(r => String(r[yKey])))]
+    // Order days Lun-Dom if present
+    const dayOrder = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo']
+    const rawY = [...new Set(processedData.map(r => String(r[yKey])))]
+    const yValues = rawY.some(v => dayOrder.includes(v))
+      ? dayOrder.filter(d => rawY.includes(d))
+      : rawY
+    // Sort X numerically if possible (hours 0-23)
+    const rawX = [...new Set(processedData.map(r => String(r[xKey])))]
+    const xValues = rawX.every(v => !isNaN(Number(v)))
+      ? rawX.sort((a, b) => Number(a) - Number(b))
+      : rawX
+
     const allZ = processedData.map(r => Number(r[zKey]) || 0)
     const minZ = Math.min(...allZ)
     const maxZ = Math.max(...allZ)
     const rangeZ = maxZ - minZ || 1
 
-    const cellW = Math.max(Math.floor((height * 1.5) / xValues.length), 30)
-    const cellH = Math.max(Math.floor(height / (yValues.length + 1)), 24)
-    const totalW = cellW * xValues.length + 80
+    const yLabelW = 80
+    const legendW = 24
+    const cellW = Math.max(Math.floor(((fillContainer ? 600 : height * 1.8) - yLabelW - legendW) / xValues.length), 28)
+    const cellH = Math.max(Math.floor((fillContainer ? 240 : height - 40) / yValues.length), 22)
+    const totalW = cellW * xValues.length + yLabelW + legendW + 8
+    const totalH = cellH * yValues.length + 30
 
     const getColor = (val: number) => {
       const t = (val - minZ) / rangeZ
-      const r = Math.round(66 + (30 - 66) * t)
-      const g = Math.round(133 + (136 - 133) * t)
-      const b = Math.round(244 + (229 - 244) * t)
+      if (t < 0.5) {
+        const s = t / 0.5
+        const r = Math.round(232 + (0 - 232) * s)
+        const g = Math.round(244 + (102 - 244) * s)
+        const b = Math.round(253 + (204 - 253) * s)
+        return `rgb(${r},${g},${b})`
+      }
+      const s = (t - 0.5) / 0.5
+      const r = Math.round(0 + (0 - 0) * s)
+      const g = Math.round(102 + (61 - 102) * s)
+      const b = Math.round(204 + (115 - 204) * s)
       return `rgb(${r},${g},${b})`
     }
+    const textColor = (val: number) => ((val - minZ) / rangeZ) > 0.4 ? '#fff' : '#374151'
 
     return (
-      <div style={{ width: '100%', height: fillContainer ? '100%' : height, overflow: 'auto' }}>
-        <svg width={Math.max(totalW, 300)} height={Math.max(cellH * (yValues.length + 1) + 40, height)}>
-          {/* X axis labels */}
+      <div style={{ width: '100%', height: fillContainer ? '100%' : height, overflow: 'auto', position: 'relative' }}>
+        <svg width={Math.max(totalW, 300)} height={Math.max(totalH, 120)} style={{ fontFamily: ff }}>
+          {/* X axis labels (top) */}
           {xValues.map((xv, xi) => (
-            <text key={`xl-${xi}`} x={80 + xi * cellW + cellW / 2} y={14} textAnchor="middle" fontSize={10} fill="#6E7191">{xv}</text>
+            <text key={`xl-${xi}`} x={yLabelW + xi * cellW + cellW / 2} y={12} textAnchor="middle" fontSize={10} fill="#6E7191">{xv}</text>
           ))}
           {/* Rows */}
           {yValues.map((yv, yi) => (
             <g key={`row-${yi}`}>
-              <text x={75} y={24 + yi * cellH + cellH / 2 + 4} textAnchor="end" fontSize={10} fill="#6E7191">{yv}</text>
+              <text x={yLabelW - 6} y={20 + yi * cellH + cellH / 2 + 4} textAnchor="end" fontSize={10} fill="#6E7191">{yv}</text>
               {xValues.map((xv, xi) => {
                 const row = processedData.find(r => String(r[xKey]) === xv && String(r[yKey]) === yv)
                 const val = row ? Number(row[zKey]) || 0 : 0
                 return (
                   <g key={`cell-${yi}-${xi}`}>
-                    <rect x={80 + xi * cellW} y={20 + yi * cellH} width={cellW - 2} height={cellH - 2} rx={3} fill={getColor(val)} />
-                    <text x={80 + xi * cellW + cellW / 2} y={20 + yi * cellH + cellH / 2 + 4} textAnchor="middle" fontSize={9} fill="#fff">{val}</text>
+                    <rect x={yLabelW + xi * cellW} y={18 + yi * cellH} width={cellW - 2} height={cellH - 2} rx={4} fill={getColor(val)} />
+                    <text x={yLabelW + xi * cellW + cellW / 2} y={18 + yi * cellH + cellH / 2 + 4} textAnchor="middle" fontSize={cellW > 32 ? 10 : 8} fill={textColor(val)} fontWeight="500">{val}</text>
                   </g>
                 )
               })}
             </g>
           ))}
+          {/* Color scale legend */}
+          <defs>
+            <linearGradient id="hm-grad" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="#E8F4FD" />
+              <stop offset="50%" stopColor="#0066CC" />
+              <stop offset="100%" stopColor="#003D73" />
+            </linearGradient>
+          </defs>
+          <rect x={yLabelW + xValues.length * cellW + 8} y={18} width={14} height={yValues.length * cellH} rx={4} fill="url(#hm-grad)" />
+          <text x={yLabelW + xValues.length * cellW + 15} y={16} textAnchor="middle" fontSize={8} fill="#6E7191">{maxZ}</text>
+          <text x={yLabelW + xValues.length * cellW + 15} y={22 + yValues.length * cellH} textAnchor="middle" fontSize={8} fill="#6E7191">{minZ}</text>
         </svg>
       </div>
     )

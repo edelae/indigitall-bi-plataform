@@ -122,6 +122,21 @@ export async function archiveDashboard(id: number): Promise<{ success: boolean }
   return request(`/dashboards/${id}/archive`, { method: 'POST' })
 }
 
+// Analytics
+export async function fetchAnalytics<T = any>(
+  endpoint: string,
+  params?: Record<string, string | number | boolean | undefined>,
+): Promise<T> {
+  const searchParams = new URLSearchParams()
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null) searchParams.set(k, String(v))
+    }
+  }
+  const qs = searchParams.toString()
+  return request(`/analytics/${endpoint}${qs ? '?' + qs : ''}`)
+}
+
 // Schema
 export async function listTables(): Promise<TableInfo[]> {
   return request('/schema/tables')

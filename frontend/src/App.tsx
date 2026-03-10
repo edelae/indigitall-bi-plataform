@@ -6,6 +6,7 @@ import QueryList from './pages/QueryList'
 import DashboardList from './pages/DashboardList'
 import DashboardBuilder from './pages/DashboardBuilder'
 import DashboardView from './pages/DashboardView'
+import DashboardVisionamos from './pages/DashboardVisionamos'
 import DataExplorer from './pages/DataExplorer'
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="/consultas/nueva" element={<QueryChat />} />
         <Route path="/tableros" element={<DashboardList />} />
         <Route path="/tableros/nuevo" element={<DashboardBuilder />} />
+        <Route path="/tableros/visionamos" element={<DashboardVisionamos />} />
         <Route path="/tableros/saved/:id" element={<DashboardView />} />
         <Route path="/datos" element={<DataExplorer />} />
       </Route>

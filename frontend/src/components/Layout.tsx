@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { Home, Search, LayoutGrid, Database, Plus, ChevronDown } from 'lucide-react'
+import { Home, Search, LayoutGrid, Database, Plus, ChevronDown, Sun, Moon } from 'lucide-react'
 import { useState } from 'react'
+import { useTheme } from '../contexts/ThemeContext'
 
 const NAV_ITEMS = [
   { path: '/', label: 'Inicio', icon: Home },
@@ -12,11 +13,12 @@ const NAV_ITEMS = [
 export default function Layout() {
   const location = useLocation()
   const [createOpen, setCreateOpen] = useState(false)
+  const { isDark, toggle } = useTheme()
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white dark:bg-gray-900">
       {/* Navbar */}
-      <nav className="sticky top-0 z-50 bg-white border-b border-border-light shadow-sm">
+      <nav className="sticky top-0 z-50 bg-white dark:bg-gray-900 border-b border-border-light dark:border-gray-800 shadow-sm">
         <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
           {/* Left: Logo */}
           <Link to="/" className="flex items-center gap-2 no-underline">
@@ -47,7 +49,15 @@ export default function Layout() {
             })}
           </div>
 
-          {/* Right: Create dropdown */}
+          {/* Right: Theme toggle + Create dropdown */}
+          <div className="flex items-center gap-2">
+          <button
+            onClick={toggle}
+            className="p-2 rounded-btn text-text-muted hover:bg-surface dark:hover:bg-gray-800 transition-colors"
+            title={isDark ? 'Modo claro' : 'Modo oscuro'}
+          >
+            {isDark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
           <div className="relative">
             <button
               onClick={() => setCreateOpen(!createOpen)}
@@ -60,7 +70,7 @@ export default function Layout() {
             {createOpen && (
               <>
                 <div className="fixed inset-0" onClick={() => setCreateOpen(false)} />
-                <div className="absolute right-0 mt-1 w-48 bg-white rounded-btn shadow-card-hover border border-border-light z-50">
+                <div className="absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-btn shadow-card-hover border border-border-light dark:border-gray-700 z-50">
                   <Link
                     to="/consultas/nueva"
                     className="flex items-center gap-2 px-4 py-2.5 text-sm text-text-dark hover:bg-surface no-underline"
@@ -80,6 +90,7 @@ export default function Layout() {
                 </div>
               </>
             )}
+          </div>
           </div>
         </div>
       </nav>

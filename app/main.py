@@ -42,13 +42,14 @@ app.add_middleware(
 )
 
 # API Routers
-from app.routers import health, ai, queries, dashboards, schema, pipeline  # noqa: E402
+from app.routers import health, ai, queries, dashboards, schema, pipeline, analytics  # noqa: E402
 app.include_router(health.router, tags=["health"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(queries.router, prefix="/api/queries", tags=["queries"])
 app.include_router(dashboards.router, prefix="/api/dashboards", tags=["dashboards"])
 app.include_router(schema.router, prefix="/api/schema", tags=["schema"])
 app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 
 # Serve React SPA
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")

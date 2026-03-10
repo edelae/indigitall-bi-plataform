@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   LayoutGrid, Plus, Search, Star, Archive,
-  Clock, Loader2, Pencil, Eye,
+  Clock, Loader2, Pencil, Eye, Zap,
+  MessageSquare, Headphones, Send, Shield,
 } from 'lucide-react'
 import { listDashboards, toggleDashboardFavorite, archiveDashboard } from '../api/client'
 import type { Dashboard, DashboardWidget } from '../types'
@@ -196,6 +197,47 @@ export default function DashboardList() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {/* Visionamos — predefined live dashboard */}
+          <div
+            onClick={() => navigate('/tableros/visionamos')}
+            className="card overflow-hidden cursor-pointer hover:shadow-card-hover transition-all relative"
+          >
+            <div className="h-40 relative overflow-hidden bg-gradient-to-br from-[#0066CC] to-[#003D73] flex items-center justify-center">
+              <div className="absolute inset-0 opacity-10">
+                <svg viewBox="0 0 200 120" className="w-full h-full">
+                  <rect x="10" y="10" width="40" height="100" rx="4" fill="white" />
+                  <rect x="60" y="30" width="40" height="80" rx="4" fill="white" />
+                  <rect x="110" y="20" width="40" height="90" rx="4" fill="white" />
+                  <rect x="160" y="50" width="30" height="60" rx="4" fill="white" />
+                </svg>
+              </div>
+              <div className="text-center relative z-10">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Zap size={20} className="text-white" />
+                  <span className="text-white font-bold text-lg">Visionamos</span>
+                </div>
+                <div className="flex items-center justify-center gap-3 mt-2">
+                  {[MessageSquare, Headphones, Send, Shield].map((Icon, i) => (
+                    <div key={i} className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
+                      <Icon size={13} className="text-white" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="flex items-start justify-between mb-1">
+                <h3 className="font-semibold text-sm text-text-dark">Dashboard Visionamos</h3>
+                <span className="badge badge-primary text-[10px]">En vivo</span>
+              </div>
+              <p className="text-xs text-text-muted mb-2">WhatsApp, Bot, Contact Center, SMS y Control de Toques con datos en tiempo real</p>
+              <div className="flex items-center gap-2 text-[11px] text-text-light">
+                <span className="badge badge-info">5 tabs</span>
+                <span className="badge badge-success">Datos reales</span>
+              </div>
+            </div>
+          </div>
+
           {dashboards.map(d => {
             const widgetCount = d.layout?.length || 0
             const isHovered = hoveredId === d.id
