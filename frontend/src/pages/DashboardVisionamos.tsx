@@ -1,14 +1,15 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   MessageSquare, Bot, Headphones, Send, Shield,
   RefreshCw, Download, Calendar, Loader2,
   Users, Clock, PhoneCall, BarChart3, Zap, AlertTriangle,
-  TrendingUp, Hash, Target,
+  TrendingUp, Hash, Target, ExternalLink,
 } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
 import ChartWidget from '../components/ChartWidget'
 import DashboardAnalyst from '../components/DashboardAnalyst'
-import { fetchAnalytics } from '../api/client'
+import { fetchAnalytics, saveQuery } from '../api/client'
 import { exportCsv } from '../utils/csvExport'
 import type { ChartType } from '../types'
 
@@ -60,26 +61,38 @@ const emptyDf: DfResponse = { columns: [], data: [] }
 
 // ─── Widget wrapper ──────────────────────────────────────────────
 
-function Widget({ title, children, className = '', onExport }: {
+function Widget({ title, children, className = '', onExport, onOpenQuery }: {
   title: string; children: React.ReactNode; className?: string;
-  onExport?: () => void
+  onExport?: () => void; onOpenQuery?: () => void
 }) {
   return (
-    <div className={`card p-4 flex flex-col ${className}`}>
+    <div className={`card p-4 flex flex-col ${className} ${onOpenQuery ? 'group' : ''}`}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h3>
-        {onExport && (
-          <button
-            onClick={onExport}
-            className="hover:text-primary transition-colors p-1"
-            style={{ color: 'var(--text-muted)' }}
-            title="Descargar CSV"
-          >
-            <Download size={14} />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {onOpenQuery && (
+            <button
+              onClick={onOpenQuery}
+              className="opacity-0 group-hover:opacity-100 hover:text-primary transition-all p-1"
+              style={{ color: 'var(--text-muted)' }}
+              title="Abrir en consultas"
+            >
+              <ExternalLink size={14} />
+            </button>
+          )}
+          {onExport && (
+            <button
+              onClick={onExport}
+              className="hover:text-primary transition-colors p-1"
+              style={{ color: 'var(--text-muted)' }}
+              title="Descargar CSV"
+            >
+              <Download size={14} />
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex-1 min-h-0">{children}</div>
+      <div className="flex-1 min-h-0 cursor-pointer" onClick={onOpenQuery}>{children}</div>
     </div>
   )
 }
@@ -119,6 +132,7 @@ function SimpleTable({ data, columns }: DfResponse) {
 // ─── Main Component ──────────────────────────────────────────────
 
 export default function DashboardVisionamos() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<TabKey>('whatsapp')
   const [refreshKey, setRefreshKey] = useState(0)
   const [startDate, setStartDate] = useState('')
@@ -253,6 +267,21 @@ export default function DashboardVisionamos() {
     )
   }
 
+  // Save chart data as query and navigate to consultas
+  async function openQuery(title: string, df: DfResponse | undefined, chartType: ChartType) {
+    if (!df?.data?.length) return
+    try {
+      const result = await saveQuery({
+        name: title,
+        query_text: title,
+        data: df.data,
+        columns: df.columns,
+        chart_type: chartType,
+      })
+      navigate(`/consultas/nueva?rerun=${result.id}`)
+    } catch { /* ignore */ }
+  }
+
   function renderChart(df: DfResponse | undefined, type: ChartType, height = 280) {
     if (!df || !df.data?.length) return <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>Sin datos</p>
     return <ChartWidget data={df.data} columns={df.columns} chartType={type} height={height} />
@@ -280,17 +309,17 @@ export default function DashboardVisionamos() {
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-          <Widget title="Mensajes por Hora" className="lg:col-span-3 min-h-[300px]">
+          <Widget title="Mensajes por Hora" className="lg:col-span-3 min-h-[300px]" onOpenQuery={() => openQuery('Mensajes por Hora', wa.data.byHour, 'bar')}>
             {renderChart(wa.data.byHour, 'bar', 260)}
           </Widget>
-          <Widget title="Distribucion Bot / Humano" className="lg:col-span-2 min-h-[300px]">
+          <Widget title="Distribucion Bot / Humano" className="lg:col-span-2 min-h-[300px]" onOpenQuery={() => openQuery('Distribucion Bot / Humano', wa.data.botHuman, 'pie')}>
             {renderChart(wa.data.botHuman, 'pie', 260)}
           </Widget>
         </div>
-        <Widget title="Tendencia Diaria de Mensajes" className="min-h-[320px]">
+        <Widget title="Tendencia Diaria de Mensajes" className="min-h-[320px]" onOpenQuery={() => openQuery('Tendencia Diaria de Mensajes', wa.data.trend, 'area')}>
           {renderChart(wa.data.trend, 'area', 280)}
         </Widget>
-        <Widget title="Heatmap — Mensajes por Hora y Dia" className="min-h-[300px]">
+        <Widget title="Heatmap — Mensajes por Hora y Dia" className="min-h-[300px]" onOpenQuery={() => openQuery('Heatmap Mensajes por Hora y Dia', wa.data.heatmap, 'heatmap')}>
           {renderChart(wa.data.heatmap, 'heatmap', 280)}
         </Widget>
       </div>
@@ -322,22 +351,22 @@ export default function DashboardVisionamos() {
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Tendencia Tasa Fallback" className="min-h-[300px]">
+          <Widget title="Tendencia Tasa Fallback" className="min-h-[300px]" onOpenQuery={() => openQuery('Tendencia Tasa Fallback Bot', bot.data.fallback, 'line')}>
             {renderChart(bot.data.fallback, 'line', 260)}
           </Widget>
-          <Widget title="Top Intenciones" className="min-h-[300px]">
+          <Widget title="Top Intenciones" className="min-h-[300px]" onOpenQuery={() => openQuery('Top Intenciones del Bot', bot.data.intents, 'bar_horizontal')}>
             {renderChart(bot.data.intents, 'bar_horizontal', 260)}
           </Widget>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Distribucion Bot / Humano" className="min-h-[300px]">
+          <Widget title="Distribucion Bot / Humano" className="min-h-[300px]" onOpenQuery={() => openQuery('Distribucion Bot vs Humano', bot.data.botHuman, 'pie')}>
             {renderChart(bot.data.botHuman, 'pie', 260)}
           </Widget>
-          <Widget title="Tipos de Contenido" className="min-h-[300px]">
+          <Widget title="Tipos de Contenido" className="min-h-[300px]" onOpenQuery={() => openQuery('Tipos de Contenido de Mensajes', bot.data.content, 'bar_horizontal')}>
             {renderChart(bot.data.content, 'bar_horizontal', 260)}
           </Widget>
         </div>
-        <Widget title="Heatmap — Mensajes por Hora y Dia" className="min-h-[300px]">
+        <Widget title="Heatmap — Mensajes por Hora y Dia" className="min-h-[300px]" onOpenQuery={() => openQuery('Heatmap Bot Mensajes por Hora y Dia', bot.data.heatmap, 'heatmap')}>
           {renderChart(bot.data.heatmap, 'heatmap', 280)}
         </Widget>
       </div>
@@ -372,38 +401,39 @@ export default function DashboardVisionamos() {
           title="Rendimiento de Agentes"
           className="min-h-[200px]"
           onExport={() => cc.data?.agents && exportCsv(cc.data.agents.data, cc.data.agents.columns, 'agentes')}
+          onOpenQuery={() => openQuery('Rendimiento de Agentes Visionamos', cc.data.agents, 'table')}
         >
           <SimpleTable {...(cc.data.agents || emptyDf)} />
         </Widget>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Razones de Cierre" className="min-h-[300px]">
+          <Widget title="Razones de Cierre" className="min-h-[300px]" onOpenQuery={() => openQuery('Razones de Cierre de Conversacion', cc.data.reasons, 'pie')}>
             {renderChart(cc.data.reasons, 'pie', 260)}
           </Widget>
-          <Widget title="Conversaciones en el Tiempo" className="min-h-[300px]">
+          <Widget title="Conversaciones en el Tiempo" className="min-h-[300px]" onOpenQuery={() => openQuery('Conversaciones en el Tiempo', cc.data.trend, 'area')}>
             {renderChart(cc.data.trend, 'area', 260)}
           </Widget>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Tendencia FRT" className="min-h-[300px]">
+          <Widget title="Tendencia FRT" className="min-h-[300px]" onOpenQuery={() => openQuery('Tendencia First Response Time', cc.data.frt, 'line')}>
             {renderChart(cc.data.frt, 'line', 260)}
           </Widget>
-          <Widget title="Tendencia Handle Time" className="min-h-[300px]">
+          <Widget title="Tendencia Handle Time" className="min-h-[300px]" onOpenQuery={() => openQuery('Tendencia Handle Time', cc.data.handle, 'line')}>
             {renderChart(cc.data.handle, 'line', 260)}
           </Widget>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Cola por Hora" className="min-h-[300px]">
+          <Widget title="Cola por Hora" className="min-h-[300px]" onOpenQuery={() => openQuery('Cola de Espera por Hora', cc.data.queue, 'bar')}>
             {renderChart(cc.data.queue, 'bar', 260)}
           </Widget>
-          <Widget title="Tipo Conversacion (Bot/Humano/Mixta)" className="min-h-[300px]">
+          <Widget title="Tipo Conversacion (Bot/Humano/Mixta)" className="min-h-[300px]" onOpenQuery={() => openQuery('Tipo de Conversacion Bot vs Humano vs Mixta', cc.data.convTypeTrend, 'area_stacked')}>
             {renderChart(cc.data.convTypeTrend, 'area_stacked', 260)}
           </Widget>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Tendencia Dead Time" className="min-h-[300px]">
+          <Widget title="Tendencia Dead Time" className="min-h-[300px]" onOpenQuery={() => openQuery('Tendencia Dead Time', cc.data.deadTime, 'line')}>
             {renderChart(cc.data.deadTime, 'line', 260)}
           </Widget>
-          <Widget title="Distribucion Tiempo de Espera" className="min-h-[300px]">
+          <Widget title="Distribucion Tiempo de Espera" className="min-h-[300px]" onOpenQuery={() => openQuery('Distribucion Tiempo de Espera', cc.data.waitDist, 'bar')}>
             {renderChart(cc.data.waitDist, 'bar', 260)}
           </Widget>
         </div>
@@ -436,22 +466,22 @@ export default function DashboardVisionamos() {
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Enviados vs Chunks" className="min-h-[300px]">
+          <Widget title="Enviados vs Chunks" className="min-h-[300px]" onOpenQuery={() => openQuery('SMS Enviados vs Chunks', sms.data.trend, 'line')}>
             {renderChart(sms.data.trend, 'line', 260)}
           </Widget>
-          <Widget title="Tipo de Envio" className="min-h-[300px]">
+          <Widget title="Tipo de Envio" className="min-h-[300px]" onOpenQuery={() => openQuery('Tipo de Envio SMS', sms.data.types, 'pie')}>
             {renderChart(sms.data.types, 'pie', 260)}
           </Widget>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Top Campanas por Volumen" className="min-h-[300px]">
+          <Widget title="Top Campanas por Volumen" className="min-h-[300px]" onOpenQuery={() => openQuery('Top Campanas SMS por Volumen', sms.data.campaigns, 'bar_horizontal')}>
             {renderChart(sms.data.campaigns, 'bar_horizontal', 260)}
           </Widget>
-          <Widget title="Top Campanas por Chunks/Envio" className="min-h-[300px]">
+          <Widget title="Top Campanas por Chunks/Envio" className="min-h-[300px]" onOpenQuery={() => openQuery('Top Campanas SMS por Chunks/Envio', sms.data.campaignsCtr, 'bar_horizontal')}>
             {renderChart(sms.data.campaignsCtr, 'bar_horizontal', 260)}
           </Widget>
         </div>
-        <Widget title="Heatmap — SMS por Hora y Dia" className="min-h-[300px]">
+        <Widget title="Heatmap — SMS por Hora y Dia" className="min-h-[300px]" onOpenQuery={() => openQuery('Heatmap SMS por Hora y Dia', sms.data.heatmap, 'heatmap')}>
           {renderChart(sms.data.heatmap, 'heatmap', 280)}
         </Widget>
       </div>
@@ -497,10 +527,10 @@ export default function DashboardVisionamos() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Widget title="Distribucion de Toques por Contacto" className="min-h-[300px]">
+          <Widget title="Distribucion de Toques por Contacto" className="min-h-[300px]" onOpenQuery={() => openQuery('Distribucion de Toques por Contacto', toques.data.dist, 'bar')}>
             {renderChart(toques.data.dist, 'bar', 260)}
           </Widget>
-          <Widget title="Tendencia Semanal % Sobre-tocados" className="min-h-[300px]">
+          <Widget title="Tendencia Semanal % Sobre-tocados" className="min-h-[300px]" onOpenQuery={() => openQuery('Tendencia Semanal % Sobre-tocados', toques.data.weeklyTrend, 'line')}>
             {renderChart(toques.data.weeklyTrend, 'line', 260)}
           </Widget>
         </div>
@@ -509,6 +539,7 @@ export default function DashboardVisionamos() {
           title="Contactos Sobre-tocados"
           className="min-h-[200px]"
           onExport={() => toques.data?.overTouched && exportCsv(toques.data.overTouched.data, toques.data.overTouched.columns, 'sobre_tocados')}
+          onOpenQuery={() => openQuery('Contactos Sobre-tocados', toques.data.overTouched, 'table')}
         >
           <SimpleTable {...(toques.data.overTouched || emptyDf)} />
         </Widget>
