@@ -8,7 +8,7 @@ from sqlalchemy import select, func, and_, case, text
 from typing import Optional, Dict, Any
 
 from app.models.database import engine
-from app.models.schemas import Agent, ChatConversation
+from app.models.schemas import ChatConversation
 
 log = logging.getLogger(__name__)
 
@@ -258,27 +258,20 @@ class ContactCenterService:
     ) -> pd.DataFrame:
         """Expanded agent performance with FRT and handle time, joined with agents table."""
         t = ChatConversation.__table__
-        a = Agent.__table__
         w = and_(
             self._base_where(t, tenant_filter, start_date, end_date),
             t.c.agent_id.isnot(None),
         )
-        joined = t.outerjoin(
-            a,
-            and_(t.c.agent_id == a.c.agent_id, t.c.tenant_id == a.c.tenant_id),
-        )
         stmt = (
             select(
-                func.coalesce(a.c.agent_email, t.c.agent_id).label("agent_email"),
-                a.c.team,
-                func.count().label("conversations"),
-                func.count(func.distinct(t.c.contact_id)).label("contacts"),
+                t.c.agent_id.label("agente"),
+                func.count().label("conversaciones"),
+                func.count(func.distinct(t.c.contact_id)).label("contactos"),
                 func.avg(t.c.wait_time_seconds).label("avg_frt"),
                 func.avg(t.c.handle_time_seconds).label("avg_handle"),
             )
-            .select_from(joined)
             .where(w)
-            .group_by(a.c.agent_email, t.c.agent_id, a.c.team)
+            .group_by(t.c.agent_id)
             .order_by(func.count().desc())
             .limit(limit)
         )
