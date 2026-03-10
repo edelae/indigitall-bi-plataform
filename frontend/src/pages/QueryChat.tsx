@@ -1,35 +1,17 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Send, Download, Bookmark, BarChart3, LineChart, PieChart,
-  AreaChart, Table2, Loader2, Code, Sparkles, Database,
-  ScatterChart, Layers, Activity, Triangle, Grid3X3,
-  GitBranch, Gauge, BarChartHorizontal,
+  Send, Download, Bookmark, BarChart3, Loader2, Code, Sparkles, Database,
+  Table2, Settings2,
 } from 'lucide-react'
 import ChatMessage from '../components/ChatMessage'
 import ChartWidget from '../components/ChartWidget'
 import DataTable from '../components/DataTable'
 import KpiCard from '../components/KpiCard'
+import ChartCustomizer, { type ChartConfig } from '../components/ChartCustomizer'
 import type { ChatMessage as ChatMsg, QueryResult, ChartType, TableInfo } from '../types'
 import { sendChat, saveQuery, getQuery, listTables } from '../api/client'
-import { PRIMARY_COLOR } from '../types'
-
-const CHART_TYPES: { type: ChartType; icon: typeof BarChart3; label: string }[] = [
-  { type: 'bar', icon: BarChart3, label: 'Barras' },
-  { type: 'bar_horizontal', icon: BarChartHorizontal, label: 'Horizontal' },
-  { type: 'bar_stacked', icon: Layers, label: 'Apiladas' },
-  { type: 'line', icon: LineChart, label: 'Linea' },
-  { type: 'pie', icon: PieChart, label: 'Torta' },
-  { type: 'area', icon: AreaChart, label: 'Area' },
-  { type: 'area_stacked', icon: Layers, label: 'Area Apilada' },
-  { type: 'scatter', icon: ScatterChart, label: 'Dispersion' },
-  { type: 'combo', icon: Activity, label: 'Combinada' },
-  { type: 'funnel', icon: Triangle, label: 'Funnel' },
-  { type: 'treemap', icon: Grid3X3, label: 'Treemap' },
-  { type: 'heatmap', icon: Grid3X3, label: 'Heatmap' },
-  { type: 'gauge', icon: Gauge, label: 'Gauge' },
-  { type: 'table', icon: Table2, label: 'Tabla' },
-]
+import { PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 
 const SUGGESTIONS = [
   'Dame un resumen general de los datos',
@@ -53,6 +35,11 @@ export default function QueryChat() {
   const [activeTab, setActiveTab] = useState<'chart' | 'source'>('chart')
   const [tables, setTables] = useState<TableInfo[]>([])
   const [tableSearch, setTableSearch] = useState('')
+  const [showCustomizer, setShowCustomizer] = useState(false)
+  const [chartConfig, setChartConfig] = useState<ChartConfig>({
+    chartType: 'bar',
+    showLegend: true,
+  })
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Load tables for source panel
@@ -80,6 +67,7 @@ export default function QueryChat() {
           setLastResult(restoredResult)
           if (chartType && chartType !== 'table') {
             setSelectedChart(chartType as ChartType)
+            setChartConfig(prev => ({ ...prev, chartType: chartType as ChartType }))
           }
           setActiveTab('chart')
         }
@@ -90,7 +78,6 @@ export default function QueryChat() {
             result: m.role === 'assistant' && restoredResult ? restoredResult : undefined,
           })))
         } else if (restoredResult && query.query_text) {
-          // No conversation history but we have saved data — show it directly
           setMessages([
             { role: 'user', content: query.query_text },
             { role: 'assistant', content: restoredResult.response || `Resultado: ${query.name}`, result: restoredResult },
@@ -126,6 +113,7 @@ export default function QueryChat() {
       setLastResult(result)
       if (result.chart_type && result.chart_type !== 'table') {
         setSelectedChart(result.chart_type as ChartType)
+        setChartConfig(prev => ({ ...prev, chartType: result.chart_type as ChartType }))
       }
       if (result.data?.length) setActiveTab('chart')
     } catch (err: any) {
@@ -149,7 +137,7 @@ export default function QueryChat() {
         columns: lastResult.columns,
         ai_function: lastResult.query_details?.function || null,
         generated_sql: lastResult.query_details?.sql || null,
-        chart_type: selectedChart,
+        chart_type: chartConfig.chartType,
         conversation_history: messages,
       })
       setSaved(true)
@@ -159,17 +147,25 @@ export default function QueryChat() {
   const handleExport = () => {
     if (!lastResult?.data?.length || !lastResult.columns.length) return
     const cols = lastResult.columns
+    const bom = '\uFEFF'
     const csv = [
       cols.join(','),
       ...lastResult.data.map(row => cols.map(c => `"${String(row[c] ?? '')}"`).join(',')),
     ].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
+    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'consulta_resultado.csv'
+    a.download = `consulta_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleConfigChange = (newConfig: ChartConfig) => {
+    setChartConfig(newConfig)
+    if (newConfig.chartType !== selectedChart) {
+      setSelectedChart(newConfig.chartType)
+    }
   }
 
   const hasData = !!lastResult?.data?.length && lastResult.columns.length >= 2
@@ -179,6 +175,11 @@ export default function QueryChat() {
   const filteredTables = tableSearch
     ? tables.filter(t => t.table_name.toLowerCase().includes(tableSearch.toLowerCase()))
     : tables
+
+  // Resolve colors from palette
+  const chartColors = chartConfig.colorPalette
+    ? COLOR_PALETTES[chartConfig.colorPalette]?.colors
+    : undefined
 
   return (
     <div className="animate-fade-in flex gap-6 h-[calc(100vh-88px)]">
@@ -190,7 +191,7 @@ export default function QueryChat() {
               <Sparkles size={18} className="text-primary" />
               <h2 className="text-lg font-semibold">Asistente IA</h2>
             </div>
-            <p className="text-sm text-text-muted mb-4">
+            <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
               Pregunta sobre tus datos. Puedes pedir graficas, tablas o tarjetas KPI.
             </p>
             <div className="flex flex-wrap gap-2">
@@ -198,7 +199,11 @@ export default function QueryChat() {
                 <button
                   key={i}
                   onClick={() => handleSend(s)}
-                  className="text-xs px-3 py-1.5 rounded-pill border border-border hover:bg-primary/5 hover:border-primary/30 text-text-muted hover:text-primary transition-colors"
+                  className="text-xs px-3 py-1.5 rounded-pill transition-colors"
+                  style={{
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-muted)',
+                  }}
                 >
                   {s}
                 </button>
@@ -211,7 +216,7 @@ export default function QueryChat() {
           {messages.map((msg, i) => (
             <ChatMessage key={i} role={msg.role} content={msg.content}>
               {msg.result?.data?.length ? (
-                <div className="text-xs text-text-muted mt-1">
+                <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
                   {msg.result.data.length} filas
                   {msg.result.query_details?.function && (
                     <span className="badge badge-primary ml-2">{msg.result.query_details.function}</span>
@@ -221,7 +226,7 @@ export default function QueryChat() {
             </ChatMessage>
           ))}
           {loading && (
-            <div className="flex items-center gap-2 text-text-muted text-sm mb-4 animate-pulse-dot">
+            <div className="flex items-center gap-2 text-sm mb-4 animate-pulse-dot" style={{ color: 'var(--text-muted)' }}>
               <Loader2 size={16} className="animate-spin" /> Procesando consulta...
             </div>
           )}
@@ -244,61 +249,55 @@ export default function QueryChat() {
       </div>
 
       {/* Right: Results Panel */}
-      <div className="w-[55%] flex flex-col min-w-0 border-l border-border-light pl-6">
+      <div className={`${showCustomizer ? 'w-[42%]' : 'w-[55%]'} flex flex-col min-w-0 border-l pl-6 transition-all`}
+        style={{ borderColor: 'var(--border-light)' }}>
         {!lastResult ? (
           <div className="flex-1 flex items-center justify-center text-center">
             <div>
-              <BarChart3 size={48} className="text-text-light mx-auto mb-3" />
-              <p className="text-text-muted text-sm">Los resultados apareceran aqui</p>
+              <BarChart3 size={48} className="mx-auto mb-3" style={{ color: 'var(--text-light)' }} />
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Los resultados apareceran aqui</p>
             </div>
           </div>
         ) : (
           <>
             {/* Tabs: Grafica | Fuente de Datos */}
-            <div className="flex items-center gap-1 mb-4 border-b border-border-light pb-2">
+            <div className="flex items-center gap-1 mb-4 border-b pb-2" style={{ borderColor: 'var(--border-light)' }}>
               {(['chart', 'source'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`px-3 py-1.5 text-sm font-medium rounded-btn transition-colors ${
-                    activeTab === tab ? 'bg-primary/10 text-primary' : 'text-text-muted hover:bg-surface'
+                    activeTab === tab ? 'bg-primary/10 text-primary' : 'hover:bg-surface'
                   }`}
+                  style={activeTab !== tab ? { color: 'var(--text-muted)' } : {}}
                 >
                   {tab === 'chart' ? 'Grafica' : 'Fuente de Datos'}
                 </button>
               ))}
               <div className="ml-auto flex gap-1">
-                <button onClick={handleSave} disabled={saved || !lastResult.data.length} className={`btn-ghost text-xs flex items-center gap-1 ${saved ? 'text-secondary' : ''}`}>
+                {hasData && !isKpi && (
+                  <button
+                    onClick={() => setShowCustomizer(!showCustomizer)}
+                    className={`btn-ghost text-xs flex items-center gap-1 ${showCustomizer ? 'text-primary' : ''}`}
+                    title="Personalizar grafica"
+                  >
+                    <Settings2 size={14} /> Personalizar
+                  </button>
+                )}
+                <button onClick={handleSave} disabled={saved || !lastResult.data.length}
+                  className={`btn-ghost text-xs flex items-center gap-1 ${saved ? 'text-secondary' : ''}`}>
                   <Bookmark size={14} /> {saved ? 'Guardado' : 'Guardar'}
                 </button>
-                <button onClick={handleExport} disabled={!lastResult.data.length} className="btn-ghost text-xs flex items-center gap-1">
+                <button onClick={handleExport} disabled={!lastResult.data.length}
+                  className="btn-ghost text-xs flex items-center gap-1">
                   <Download size={14} /> CSV
                 </button>
               </div>
             </div>
 
-            {/* CHART TAB: Chart type selector + chart (60%) + table (40%) */}
+            {/* CHART TAB */}
             {activeTab === 'chart' && (
               <div className="flex-1 overflow-y-auto">
-                {/* Chart type selector */}
-                {hasData && (
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {CHART_TYPES.map(({ type, icon: Icon, label }) => (
-                      <button
-                        key={type}
-                        onClick={() => setSelectedChart(type)}
-                        className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded-btn transition-colors ${
-                          selectedChart === type
-                            ? 'bg-primary text-white'
-                            : 'bg-surface text-text-muted hover:bg-gray-200'
-                        }`}
-                      >
-                        <Icon size={12} /> {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
                 {/* KPI Card */}
                 {isKpi && lastResult.data.length > 0 && (
                   <div className="card p-6 mb-4">
@@ -327,17 +326,24 @@ export default function QueryChat() {
                     <ChartWidget
                       data={lastResult.data}
                       columns={lastResult.columns}
-                      chartType={selectedChart}
+                      chartType={chartConfig.chartType}
                       height={320}
+                      colors={chartColors}
+                      xLabel={chartConfig.xLabel}
+                      yLabel={chartConfig.yLabel}
+                      showLegend={chartConfig.showLegend}
+                      fontFamily={chartConfig.fontFamily}
+                      axisFontSize={chartConfig.axisFontSize}
+                      legendFontSize={chartConfig.legendFontSize}
                     />
                   </div>
                 )}
 
-                {/* Data table always visible below chart */}
+                {/* Data table */}
                 {lastResult.data.length > 0 && (
                   <div className="card p-3">
                     <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-semibold text-text-muted">
+                      <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
                         Datos ({lastResult.data.length} filas x {lastResult.columns.length} cols)
                       </p>
                     </div>
@@ -346,19 +352,18 @@ export default function QueryChat() {
                 )}
 
                 {lastResult.data.length === 0 && (
-                  <p className="text-center text-text-muted py-8 text-sm">Sin datos</p>
+                  <p className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>Sin datos</p>
                 )}
               </div>
             )}
 
-            {/* SOURCE TAB: Tables + SQL + Preview */}
+            {/* SOURCE TAB */}
             {activeTab === 'source' && (
               <div className="flex-1 overflow-y-auto">
-                {/* Section 1: Table tree */}
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Database size={14} className="text-primary" />
-                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                       Tablas Disponibles ({tables.length})
                     </p>
                   </div>
@@ -368,16 +373,17 @@ export default function QueryChat() {
                     value={tableSearch}
                     onChange={e => setTableSearch(e.target.value)}
                   />
-                  <div className="max-h-64 overflow-y-auto border border-border-light rounded-btn">
+                  <div className="max-h-64 overflow-y-auto rounded-btn" style={{ border: '1px solid var(--border-light)' }}>
                     {filteredTables.length === 0 ? (
-                      <p className="text-xs text-text-light p-3">
+                      <p className="text-xs p-3" style={{ color: 'var(--text-light)' }}>
                         {tables.length === 0 ? 'Cargando tablas...' : 'Sin resultados'}
                       </p>
                     ) : (
                       filteredTables.map(t => (
-                        <details key={`${t.schema || 'public'}.${t.table_name}`} className="border-b border-border-light last:border-b-0">
+                        <details key={`${t.schema || 'public'}.${t.table_name}`}
+                          className="last:border-b-0" style={{ borderBottom: '1px solid var(--border-light)' }}>
                           <summary className="flex items-center justify-between text-xs py-2 px-3 cursor-pointer hover:bg-surface">
-                            <span className="font-medium text-text-dark">
+                            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
                               {t.schema && t.schema !== 'public' ? (
                                 <span className="text-primary">{t.schema}.</span>
                               ) : null}
@@ -385,14 +391,14 @@ export default function QueryChat() {
                             </span>
                             <span className="badge badge-info text-[9px]">{t.row_count.toLocaleString()}</span>
                           </summary>
-                          <div className="bg-surface/50 px-3 pb-2">
+                          <div className="px-3 pb-2" style={{ backgroundColor: 'var(--bg-surface)' }}>
                             {t.columns.map(c => (
-                              <div key={c.column_name} className="flex justify-between text-[10px] py-0.5 px-1 text-text-muted">
+                              <div key={c.column_name} className="flex justify-between text-[10px] py-0.5 px-1" style={{ color: 'var(--text-muted)' }}>
                                 <span>{c.column_name}</span>
-                                <span className="text-text-light">{c.data_type.slice(0, 15)}</span>
+                                <span style={{ color: 'var(--text-light)' }}>{c.data_type.slice(0, 15)}</span>
                               </div>
                             ))}
-                            {t.size && <div className="text-[10px] text-text-light px-1 mt-1">Tamano: {t.size}</div>}
+                            {t.size && <div className="text-[10px] px-1 mt-1" style={{ color: 'var(--text-light)' }}>Tamano: {t.size}</div>}
                           </div>
                         </details>
                       ))
@@ -400,11 +406,10 @@ export default function QueryChat() {
                   </div>
                 </div>
 
-                {/* Section 2: SQL ejecutado */}
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Code size={14} className="text-primary" />
-                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">SQL Ejecutado</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>SQL Ejecutado</p>
                   </div>
                   <div className="flex gap-2 mb-2">
                     {lastResult.query_details?.function && (
@@ -417,7 +422,8 @@ export default function QueryChat() {
                       <span className="badge badge-info">{lastResult.data.length} filas</span>
                     )}
                   </div>
-                  <pre className="bg-[#1A1A2E] text-gray-300 p-3 rounded-btn text-xs overflow-x-auto max-h-48 font-mono whitespace-pre-wrap">
+                  <pre className="p-3 rounded-btn text-xs overflow-x-auto max-h-48 font-mono whitespace-pre-wrap"
+                    style={{ backgroundColor: 'var(--tooltip-bg)', color: '#D1D5DB' }}>
                     {lastResult.query_details?.sql
                       || (lastResult.query_details?.function
                         ? `-- Funcion pre-construida: ${lastResult.query_details.function}\n-- Las funciones pre-construidas ejecutan queries optimizados internamente`
@@ -425,10 +431,9 @@ export default function QueryChat() {
                   </pre>
                 </div>
 
-                {/* Section 3: Preview (max 6 rows) */}
                 {lastResult.data.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
                       Vista Previa (max 6 registros)
                     </p>
                     <DataTable
@@ -443,6 +448,15 @@ export default function QueryChat() {
           </>
         )}
       </div>
+
+      {/* Chart Customizer Sidebar */}
+      {showCustomizer && hasData && (
+        <ChartCustomizer
+          config={chartConfig}
+          onChange={handleConfigChange}
+          onClose={() => setShowCustomizer(false)}
+        />
+      )}
     </div>
   )
 }

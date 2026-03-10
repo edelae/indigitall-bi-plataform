@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   MessageSquare, Bot, Headphones, Send, Shield,
   RefreshCw, Download, Calendar, Loader2,
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
 import ChartWidget from '../components/ChartWidget'
+import DashboardAnalyst from '../components/DashboardAnalyst'
 import { fetchAnalytics } from '../api/client'
 import { exportCsv } from '../utils/csvExport'
 import type { ChartType } from '../types'
@@ -64,13 +65,14 @@ function Widget({ title, children, className = '', onExport }: {
   onExport?: () => void
 }) {
   return (
-    <div className={`bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-4 flex flex-col ${className}`}>
+    <div className={`card p-4 flex flex-col ${className}`}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-[#374151]">{title}</h3>
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h3>
         {onExport && (
           <button
             onClick={onExport}
-            className="text-[#9CA3AF] hover:text-[#0066CC] transition-colors p-1"
+            className="hover:text-primary transition-colors p-1"
+            style={{ color: 'var(--text-muted)' }}
             title="Descargar CSV"
           >
             <Download size={14} />
@@ -85,14 +87,14 @@ function Widget({ title, children, className = '', onExport }: {
 // ─── Data Table ──────────────────────────────────────────────────
 
 function SimpleTable({ data, columns }: DfResponse) {
-  if (!data.length) return <p className="text-sm text-[#9CA3AF] text-center py-4">Sin datos</p>
+  if (!data.length) return <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>Sin datos</p>
   return (
     <div className="overflow-auto max-h-[400px]">
       <table className="w-full text-xs">
-        <thead className="sticky top-0 bg-[#F9FAFB]">
+        <thead className="sticky top-0" style={{ backgroundColor: 'var(--table-header)' }}>
           <tr>
             {columns.map(c => (
-              <th key={c} className="text-left px-2 py-1.5 font-medium text-[#6B7280] border-b border-[#E5E7EB]">
+              <th key={c} className="text-left px-2 py-1.5 font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
                 {c.replace(/_/g, ' ').replace(/\b\w/g, x => x.toUpperCase())}
               </th>
             ))}
@@ -100,9 +102,9 @@ function SimpleTable({ data, columns }: DfResponse) {
         </thead>
         <tbody>
           {data.map((row, i) => (
-            <tr key={i} className="border-b border-[#F3F4F6] hover:bg-[#F9FAFB]">
+            <tr key={i} className="hover:opacity-80" style={{ borderBottom: '1px solid var(--border-light)' }}>
               {columns.map(c => (
-                <td key={c} className="px-2 py-1.5 text-[#374151]">
+                <td key={c} className="px-2 py-1.5" style={{ color: 'var(--text-primary)' }}>
                   {row[c] !== null && row[c] !== undefined ? String(row[c]) : '-'}
                 </td>
               ))}
@@ -264,16 +266,16 @@ export default function DashboardVisionamos() {
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Total Mensajes" value={fmt(k.total_messages)} icon={MessageSquare} color="#0066CC" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Contactos Unicos" value={fmt(k.unique_contacts)} icon={Users} color="#00A86B" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Tasa Fallback" value={fmtPct(k.fallback_rate)} icon={AlertTriangle} color="#EF4444" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Tasa Entrega" value={fmtPct(k.delivery_rate)} icon={Target} color="#0099FF" />
           </div>
         </div>
@@ -303,19 +305,19 @@ export default function DashboardVisionamos() {
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Total Mensajes" value={fmt(k.total_messages)} icon={MessageSquare} color="#0066CC" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Contactos" value={fmt(k.unique_contacts)} icon={Users} color="#00A86B" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Tasa Fallback" value={fmtPct(k.fallback_rate)} icon={AlertTriangle} color="#EF4444" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Resolucion Bot" value={fmtPct(k.bot_resolution_pct)} icon={Bot} color="#0099FF" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Espera Promedio" value={fmtTime(k.avg_wait_seconds)} icon={Clock} color="#F59E0B" />
           </div>
         </div>
@@ -350,19 +352,19 @@ export default function DashboardVisionamos() {
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Conversaciones" value={fmt(k.total_conversations)} icon={PhoneCall} color="#0066CC" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Agentes Activos" value={fmt(k.active_agents)} icon={Users} color="#00A86B" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="FRT Promedio" value={fmtTime(k.avg_frt_seconds)} icon={Zap} color="#F59E0B" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Handle Time" value={fmtTime(k.avg_handle_seconds)} icon={Clock} color="#0099FF" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="FCR" value={fmtPct(k.fcr_rate)} icon={Target} color="#00A86B" />
           </div>
         </div>
@@ -417,19 +419,19 @@ export default function DashboardVisionamos() {
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Enviados" value={fmt(k.total_enviados)} icon={Send} color="#0066CC" />
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Total Chunks" value={fmt(k.total_chunks)} icon={Hash} color="#00A86B" />
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Entregados" value={fmt(k.total_delivered)} icon={BarChart3} color="#76C043" />
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Clicks" value={fmt(k.total_clicks)} icon={Target} color="#F59E0B" />
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Campanas" value={fmt(k.campanas)} icon={BarChart3} color="#0099FF" />
           </div>
         </div>
@@ -464,32 +466,32 @@ export default function DashboardVisionamos() {
     return (
       <div className="space-y-3">
         {/* Threshold slider */}
-        <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-4">
+        <div className="card p-4">
           <div className="flex items-center gap-4">
-            <label className="text-sm font-medium text-[#374151]">
+            <label className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
               Umbral de sobre-toque:
             </label>
             <input
               type="range" min={1} max={10} value={threshold}
               onChange={e => { setThreshold(Number(e.target.value)); setToques(s => ({ ...s, fetched: false })) }}
-              className="flex-1 max-w-[200px] accent-[#0066CC]"
+              className="flex-1 max-w-[200px] accent-primary"
             />
-            <span className="text-sm font-bold text-[#0066CC] w-6">{threshold}</span>
-            <span className="text-xs text-[#9CA3AF]">mensajes/contacto/semana</span>
+            <span className="text-sm font-bold text-primary w-6">{threshold}</span>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>mensajes/contacto/semana</span>
           </div>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="% Sobre-tocados" value={fmtPct(k.pct_over_touched)} icon={AlertTriangle} color="#EF4444" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Contacto-Semanas" value={fmt(k.total_contact_weeks)} icon={Users} color="#0066CC" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Sobre-tocados" value={fmt(k.over_touched)} icon={Shield} color="#F59E0B" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="card p-1">
             <KpiCard label="Prom. Msgs/Contacto" value={fmt(k.avg_msgs_per_contact_week, 1)} icon={TrendingUp} color="#00A86B" />
           </div>
         </div>
@@ -527,32 +529,32 @@ export default function DashboardVisionamos() {
   return (
     <div className="animate-fade-in -mx-6 -my-6">
       {/* Canvas background */}
-      <div className="min-h-screen bg-[#F3F4F6]">
+      <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
         {/* Header */}
-        <div className="bg-white border-b border-[#E5E7EB] px-6 py-4">
+        <div className="px-6 py-4" style={{ backgroundColor: 'var(--bg-card)', borderBottom: '1px solid var(--border)' }}>
           <div className="max-w-[1400px] mx-auto flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h1 className="text-xl font-bold text-[#111827]">Dashboard Visionamos</h1>
-              <p className="text-xs text-[#9CA3AF]">WhatsApp + Contact Center + SMS — Datos en tiempo real</p>
+              <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Dashboard Visionamos</h1>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>WhatsApp + Contact Center + SMS — Datos en tiempo real</p>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
-                <Calendar size={14} className="text-[#9CA3AF]" />
+                <Calendar size={14} style={{ color: 'var(--text-muted)' }} />
                 <input
                   type="date" value={startDate}
                   onChange={e => setStartDate(e.target.value)}
-                  className="text-xs border border-[#D1D5DB] rounded px-2 py-1 text-[#374151]"
+                  className="input text-xs !w-auto !px-2 !py-1"
                 />
-                <span className="text-xs text-[#9CA3AF]">—</span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
                 <input
                   type="date" value={endDate}
                   onChange={e => setEndDate(e.target.value)}
-                  className="text-xs border border-[#D1D5DB] rounded px-2 py-1 text-[#374151]"
+                  className="input text-xs !w-auto !px-2 !py-1"
                 />
               </div>
               <button
                 onClick={() => setRefreshKey(k => k + 1)}
-                className="flex items-center gap-1 text-xs bg-[#0066CC] text-white px-3 py-1.5 rounded hover:bg-[#005299] transition-colors"
+                className="btn-primary flex items-center gap-1 text-xs px-3 py-1.5"
               >
                 <RefreshCw size={12} />
                 Actualizar
@@ -562,7 +564,7 @@ export default function DashboardVisionamos() {
         </div>
 
         {/* Tabs */}
-        <div className="bg-white border-b border-[#E5E7EB]">
+        <div style={{ backgroundColor: 'var(--bg-card)', borderBottom: '1px solid var(--border)' }}>
           <div className="max-w-[1400px] mx-auto px-6 flex gap-0 overflow-x-auto">
             {TABS.map(tab => {
               const Icon = tab.icon
@@ -573,9 +575,10 @@ export default function DashboardVisionamos() {
                   onClick={() => setActiveTab(tab.key)}
                   className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                     isActive
-                      ? 'border-[#0066CC] text-[#0066CC]'
-                      : 'border-transparent text-[#6B7280] hover:text-[#374151] hover:border-[#D1D5DB]'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent hover:border-border'
                   }`}
+                  style={!isActive ? { color: 'var(--text-secondary)' } : {}}
                 >
                   <Icon size={15} />
                   {tab.label}
@@ -593,6 +596,28 @@ export default function DashboardVisionamos() {
           {!currentState.loading && !currentState.error && !currentState.data && !currentState.fetched && renderLoading()}
         </div>
       </div>
+
+      {/* AI Analyst Panel */}
+      <DashboardAnalyst
+        context={{
+          activeTab,
+          kpis: collectKpis(),
+          dateRange: startDate && endDate ? { start: startDate, end: endDate } : undefined,
+        }}
+      />
     </div>
   )
+
+  function collectKpis(): Record<string, string | number> {
+    const kpis: Record<string, string | number> = {}
+    const tabData = { whatsapp: wa, bot, cc, sms, toques }[activeTab]
+    if (!tabData?.data?.kpis) return kpis
+    const k = tabData.data.kpis
+    for (const [key, val] of Object.entries(k)) {
+      if (val !== null && val !== undefined) {
+        kpis[key] = val as string | number
+      }
+    }
+    return kpis
+  }
 }

@@ -137,7 +137,13 @@ export default function DashboardView() {
       navigate(`/consultas/nueva?rerun=${widget.query_id}`)
     } else if (widget.query_text) {
       navigate(`/consultas/nueva?q=${encodeURIComponent(widget.query_text)}`)
+    } else if (widget.sql) {
+      navigate(`/consultas/nueva?q=${encodeURIComponent(widget.sql)}`)
     }
+  }
+
+  const isClickable = (widget: DashboardWidget) => {
+    return !!(widget.query_id || widget.query_text || widget.sql)
   }
 
   return (
@@ -277,9 +283,9 @@ export default function DashboardView() {
 
                         {/* Widget content */}
                         <div
-                          className="flex-1 overflow-hidden cursor-pointer flex flex-col"
-                          onClick={() => handleChartClick(w)}
-                          title="Clic para ir a la consulta"
+                          className={`flex-1 overflow-hidden flex flex-col ${isClickable(w) ? 'cursor-pointer hover:bg-[#FAFBFC] transition-colors' : ''}`}
+                          onClick={() => isClickable(w) && handleChartClick(w)}
+                          title={isClickable(w) ? 'Clic para ir a la consulta' : undefined}
                           style={{ minHeight: 0 }}
                         >
                           {w.type === 'kpi' && w.kpi_value !== undefined ? (
@@ -407,12 +413,12 @@ export default function DashboardView() {
                   </pre>
                 </div>
               )}
-              {(infoModal.query_id || infoModal.query_text) && (
+              {(infoModal.query_id || infoModal.query_text || infoModal.sql) && (
                 <Link
                   to={
                     infoModal.query_id
                       ? `/consultas/nueva?rerun=${infoModal.query_id}`
-                      : `/consultas/nueva?q=${encodeURIComponent(infoModal.query_text || '')}`
+                      : `/consultas/nueva?q=${encodeURIComponent(infoModal.query_text || infoModal.sql || '')}`
                   }
                   className="btn-primary text-sm inline-flex items-center gap-1.5 no-underline"
                 >
