@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Sparkles, Send, X, Loader2, ChevronDown, ChevronUp,
   BarChart3, TrendingUp, Users, Zap, ExternalLink, Trash2,
+  Minimize2, Maximize2,
 } from 'lucide-react'
 import ChartWidget from './ChartWidget'
 import type { ChartType, QueryResult, ChatMessage } from '../types'
@@ -67,6 +68,7 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(true)
+  const [minimized, setMinimized] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -77,26 +79,37 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
   }, [])
 
   useEffect(() => {
-    if (expanded) inputRef.current?.focus()
-  }, [expanded])
+    if (expanded && !minimized) inputRef.current?.focus()
+  }, [expanded, minimized])
 
   const buildContextPrefix = (): string => {
     if (!context) return ''
     const parts: string[] = []
-    if (context.activeTab) {
-      parts.push(`[Contexto: El usuario esta viendo el tab "${context.activeTab}" del dashboard Visionamos]`)
+
+    const tabNames: Record<string, string> = {
+      whatsapp: 'WhatsApp General',
+      bot: 'Bot',
+      cc: 'Contact Center',
+      sms: 'SMS',
+      toques: 'Control de Toques',
     }
+    parts.push(`[CONTEXTO DEL DASHBOARD — tab activo: "${tabNames[context.activeTab] || context.activeTab}"]`)
+
     if (context.kpis && Object.keys(context.kpis).length > 0) {
-      const kpiStr = Object.entries(context.kpis)
-        .slice(0, 6)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join(', ')
-      parts.push(`[KPIs actuales: ${kpiStr}]`)
+      const kpiLines = Object.entries(context.kpis).map(([k, v]) => {
+        const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        return `- ${label}: ${v}`
+      })
+      parts.push(`[DATOS REALES del dashboard (usa estos datos para responder, NO inventes datos):\n${kpiLines.join('\n')}]`)
     }
+
     if (context.dateRange) {
-      parts.push(`[Rango de fechas: ${context.dateRange.start} a ${context.dateRange.end}]`)
+      parts.push(`[Rango de fechas seleccionado: ${context.dateRange.start} a ${context.dateRange.end}]`)
     }
-    return parts.length > 0 ? parts.join('\n') + '\n\n' : ''
+
+    parts.push('[INSTRUCCION: Basa tu respuesta EXCLUSIVAMENTE en los datos proporcionados arriba y en consultas reales a la base de datos. NUNCA inventes numeros ni estadisticas. Si no tienes un dato, dilo claramente.]')
+
+    return parts.join('\n') + '\n\nPregunta del usuario: '
   }
 
   const handleSend = async (text?: string) => {
@@ -117,7 +130,6 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
       const contextPrefix = buildContextPrefix()
       const fullMessage = contextPrefix + msg
 
-      // Build conversation history for context
       const history: ChatMessage[] = messages
         .filter(m => !m.result)
         .map(m => ({ role: m.role, content: m.content }))
@@ -160,14 +172,13 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
     } catch { /* ignore */ }
   }
 
-  const clearHistory = () => {
-    setMessages([])
-  }
+  const clearHistory = () => setMessages([])
 
-  if (!expanded) {
+  // Collapsed floating button
+  if (minimized) {
     return (
       <button
-        onClick={() => setExpanded(true)}
+        onClick={() => setMinimized(false)}
         className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full shadow-lg transition-all hover:scale-105"
         style={{
           backgroundColor: '#0066CC',
@@ -178,7 +189,8 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
         <Sparkles size={18} />
         <span className="text-sm font-medium">Analista IA</span>
         {messages.length > 0 && (
-          <span className="w-5 h-5 bg-white text-primary text-[10px] font-bold rounded-full flex items-center justify-center">
+          <span className="w-5 h-5 bg-white text-[10px] font-bold rounded-full flex items-center justify-center"
+            style={{ color: '#0066CC' }}>
             {messages.filter(m => m.role === 'assistant').length}
           </span>
         )}
@@ -187,21 +199,25 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 flex flex-col overflow-hidden"
+    <div
+      className="fixed bottom-6 right-6 z-40 flex flex-col overflow-hidden"
       style={{
-        width: 420,
-        height: 560,
+        width: 400,
+        height: 520,
         maxHeight: 'calc(100vh - 120px)',
         backgroundColor: 'var(--bg-card)',
         border: '1px solid var(--border)',
         borderRadius: 16,
         boxShadow: '0 8px 40px rgba(0, 0, 0, 0.15)',
-      }}>
+      }}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border)', background: 'linear-gradient(135deg, #0066CC 0%, #0052A3 100%)' }}>
+      <div
+        className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border)', background: 'linear-gradient(135deg, #0066CC 0%, #0052A3 100%)' }}
+      >
         <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-white" />
+          <Sparkles size={15} className="text-white" />
           <span className="text-sm font-semibold text-white">Analista IA</span>
           {context?.activeTab && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-pill bg-white/20 text-white font-medium">
@@ -209,20 +225,15 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {messages.length > 0 && (
             <button onClick={clearHistory} className="p-1 rounded hover:bg-white/20 transition-colors" title="Limpiar">
-              <Trash2 size={13} className="text-white/70" />
+              <Trash2 size={12} className="text-white/70" />
             </button>
           )}
-          <button onClick={() => setExpanded(false)} className="p-1 rounded hover:bg-white/20 transition-colors" title="Minimizar">
-            <ChevronDown size={14} className="text-white/70" />
+          <button onClick={() => setMinimized(true)} className="p-1 rounded hover:bg-white/20 transition-colors" title="Minimizar">
+            <Minimize2 size={12} className="text-white/70" />
           </button>
-          {onClose && (
-            <button onClick={onClose} className="p-1 rounded hover:bg-white/20 transition-colors" title="Cerrar">
-              <X size={14} className="text-white/70" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -238,7 +249,7 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
                 <button
                   key={i}
                   onClick={() => handleSend(text)}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition-colors hover:opacity-80"
                   style={{
                     backgroundColor: 'var(--bg-surface)',
                     color: 'var(--text-primary)',
@@ -257,9 +268,7 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`max-w-[90%] rounded-xl px-3 py-2 text-xs ${
-                msg.role === 'user'
-                  ? 'bg-primary text-white rounded-br-sm'
-                  : 'rounded-bl-sm'
+                msg.role === 'user' ? 'bg-primary text-white rounded-br-sm' : 'rounded-bl-sm'
               }`}
               style={msg.role === 'assistant' ? {
                 backgroundColor: 'var(--bg-surface)',
@@ -269,7 +278,6 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
             >
               <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
 
-              {/* Inline chart preview */}
               {msg.result?.data?.length && msg.result.columns.length >= 2 ? (
                 <div className="mt-2 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-light)' }}>
                   <div className="p-2" style={{ backgroundColor: 'var(--bg-card)' }}>
@@ -302,7 +310,7 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
               style={{ backgroundColor: 'var(--bg-surface)', color: 'var(--text-muted)', border: '1px solid var(--border-light)' }}>
               <Loader2 size={12} className="animate-spin" />
-              <span>Analizando...</span>
+              <span>Analizando datos...</span>
             </div>
           </div>
         )}

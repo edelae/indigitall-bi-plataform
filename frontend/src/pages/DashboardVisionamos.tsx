@@ -254,8 +254,8 @@ export default function DashboardVisionamos() {
   }
 
   function renderChart(df: DfResponse | undefined, type: ChartType, height = 280) {
-    if (!df || !df.data?.length) return <p className="text-sm text-[#9CA3AF] text-center py-8">Sin datos</p>
-    return <ChartWidget data={df.data} columns={df.columns} chartType={type} height={height} fillContainer />
+    if (!df || !df.data?.length) return <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>Sin datos</p>
+    return <ChartWidget data={df.data} columns={df.columns} chartType={type} height={height} />
   }
 
   // ─── WhatsApp Tab ────────────────────────────────────────────
