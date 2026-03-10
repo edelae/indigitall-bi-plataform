@@ -329,85 +329,126 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
     )
   }
 
-  // HEATMAP (rendered as colored grid)
+  // HEATMAP — horizontal layout: hours (0-23) on X, days (Lun-Dom) on Y
   if (chartType === 'heatmap' && columns.length >= 3) {
     const zKey = columns[2]
-    // Order days Lun-Dom if present
-    const dayOrder = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo']
-    const rawY = [...new Set(processedData.map(r => String(r[yKey])))]
-    const yValues = rawY.some(v => dayOrder.includes(v))
-      ? dayOrder.filter(d => rawY.includes(d))
-      : rawY
-    // Sort X numerically if possible (hours 0-23)
-    const rawX = [...new Set(processedData.map(r => String(r[xKey])))]
-    const xValues = rawX.every(v => !isNaN(Number(v)))
-      ? rawX.sort((a, b) => Number(a) - Number(b))
-      : rawX
+    const dayOrder = ['Lunes', 'Martes', 'Miercoles', 'Miércoles', 'Jueves', 'Viernes', 'Sabado', 'Sábado', 'Domingo']
+    const dayAbbrev: Record<string, string> = {
+      'Lunes': 'Lun', 'Martes': 'Mar', 'Miercoles': 'Mie', 'Miércoles': 'Mié',
+      'Jueves': 'Jue', 'Viernes': 'Vie', 'Sabado': 'Sáb', 'Sábado': 'Sáb', 'Domingo': 'Dom',
+    }
+    const sortAxis = (raw: string[]) => {
+      if (raw.some(v => dayOrder.includes(v))) return dayOrder.filter(d => raw.includes(d))
+      if (raw.every(v => !isNaN(Number(v)))) return [...raw].sort((a, b) => Number(a) - Number(b))
+      return raw
+    }
+
+    // Determine which column is days and which is hours
+    const rawCol0 = [...new Set(processedData.map(r => String(r[xKey])))]
+    const rawCol1 = [...new Set(processedData.map(r => String(r[yKey])))]
+    const col0IsDays = rawCol0.some(v => dayOrder.includes(v))
+    const col1IsDays = rawCol1.some(v => dayOrder.includes(v))
+
+    // Force: days on Y (rows), hours on X (columns) for horizontal layout
+    let dayCol: string, hourCol: string
+    if (col0IsDays) { dayCol = xKey; hourCol = yKey }
+    else if (col1IsDays) { dayCol = yKey; hourCol = xKey }
+    else { dayCol = xKey; hourCol = yKey }
+
+    const days = sortAxis([...new Set(processedData.map(r => String(r[dayCol])))])
+    const hours = sortAxis([...new Set(processedData.map(r => String(r[hourCol])))])
 
     const allZ = processedData.map(r => Number(r[zKey]) || 0)
     const minZ = Math.min(...allZ)
     const maxZ = Math.max(...allZ)
     const rangeZ = maxZ - minZ || 1
 
-    const yLabelW = 80
-    const legendW = 24
-    const cellW = Math.max(Math.floor(((fillContainer ? 600 : height * 1.8) - yLabelW - legendW) / xValues.length), 28)
-    const cellH = Math.max(Math.floor((fillContainer ? 240 : height - 40) / yValues.length), 22)
-    const totalW = cellW * xValues.length + yLabelW + legendW + 8
-    const totalH = cellH * yValues.length + 30
-
     const getColor = (val: number) => {
       const t = (val - minZ) / rangeZ
-      if (t < 0.5) {
-        const s = t / 0.5
-        const r = Math.round(232 + (0 - 232) * s)
-        const g = Math.round(244 + (102 - 244) * s)
-        const b = Math.round(253 + (204 - 253) * s)
-        return `rgb(${r},${g},${b})`
-      }
-      const s = (t - 0.5) / 0.5
-      const r = Math.round(0 + (0 - 0) * s)
-      const g = Math.round(102 + (61 - 102) * s)
-      const b = Math.round(204 + (115 - 204) * s)
-      return `rgb(${r},${g},${b})`
+      if (t < 0.25) return `rgba(0, 102, 204, ${0.08 + t * 0.32})`
+      if (t < 0.5) return `rgba(0, 102, 204, ${0.18 + (t - 0.25) * 1.2})`
+      if (t < 0.75) return `rgba(0, 82, 163, ${0.55 + (t - 0.5) * 1.2})`
+      return `rgba(0, 61, 115, ${0.8 + (t - 0.75) * 0.8})`
     }
-    const textColor = (val: number) => ((val - minZ) / rangeZ) > 0.4 ? '#fff' : '#374151'
+    const textColor = (val: number) => ((val - minZ) / rangeZ) > 0.35 ? '#fff' : '#374151'
 
     return (
-      <div style={{ width: '100%', height: fillContainer ? '100%' : height, overflow: 'auto', position: 'relative' }}>
-        <svg width={Math.max(totalW, 300)} height={Math.max(totalH, 120)} style={{ fontFamily: ff }}>
-          {/* X axis labels (top) */}
-          {xValues.map((xv, xi) => (
-            <text key={`xl-${xi}`} x={yLabelW + xi * cellW + cellW / 2} y={12} textAnchor="middle" fontSize={10} fill="#6E7191">{xv}</text>
+      <div style={{ width: '100%', height: fillContainer ? '100%' : height, display: 'flex', flexDirection: 'column' }}>
+        {/* CSS Grid heatmap — fully responsive */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `56px repeat(${hours.length}, 1fr) 20px`,
+          gridTemplateRows: `20px repeat(${days.length}, 1fr)`,
+          gap: 2,
+          flex: 1,
+          minHeight: 0,
+          fontFamily: ff,
+          padding: '0 4px 4px 0',
+        }}>
+          {/* Top-left corner */}
+          <div />
+          {/* Hour labels (top) */}
+          {hours.map(h => (
+            <div key={`h-${h}`} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 9, color: '#6E7191', fontWeight: 500,
+            }}>
+              {h}
+            </div>
           ))}
-          {/* Rows */}
-          {yValues.map((yv, yi) => (
-            <g key={`row-${yi}`}>
-              <text x={yLabelW - 6} y={20 + yi * cellH + cellH / 2 + 4} textAnchor="end" fontSize={10} fill="#6E7191">{yv}</text>
-              {xValues.map((xv, xi) => {
-                const row = processedData.find(r => String(r[xKey]) === xv && String(r[yKey]) === yv)
+          {/* Legend spacer */}
+          <div />
+
+          {/* Day rows */}
+          {days.map(day => (
+            <>
+              {/* Day label */}
+              <div key={`d-${day}`} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                paddingRight: 6, fontSize: 11, color: '#6E7191', fontWeight: 500,
+              }}>
+                {dayAbbrev[day] || day}
+              </div>
+              {/* Hour cells */}
+              {hours.map(h => {
+                const row = processedData.find(r => String(r[dayCol]) === day && String(r[hourCol]) === h)
                 const val = row ? Number(row[zKey]) || 0 : 0
                 return (
-                  <g key={`cell-${yi}-${xi}`}>
-                    <rect x={yLabelW + xi * cellW} y={18 + yi * cellH} width={cellW - 2} height={cellH - 2} rx={4} fill={getColor(val)} />
-                    <text x={yLabelW + xi * cellW + cellW / 2} y={18 + yi * cellH + cellH / 2 + 4} textAnchor="middle" fontSize={cellW > 32 ? 10 : 8} fill={textColor(val)} fontWeight="500">{val}</text>
-                  </g>
+                  <div
+                    key={`c-${day}-${h}`}
+                    title={`${dayAbbrev[day] || day} ${h}:00 — ${val.toLocaleString()}`}
+                    style={{
+                      backgroundColor: getColor(val),
+                      borderRadius: 3,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 8, fontWeight: 500,
+                      color: textColor(val),
+                      cursor: 'default',
+                      minHeight: 20,
+                      transition: 'opacity 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                  >
+                    {val > 0 ? val.toLocaleString() : ''}
+                  </div>
                 )
               })}
-            </g>
+              {/* Row spacer for legend */}
+              <div key={`s-${day}`} />
+            </>
           ))}
-          {/* Color scale legend */}
-          <defs>
-            <linearGradient id="hm-grad" x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stopColor="#E8F4FD" />
-              <stop offset="50%" stopColor="#0066CC" />
-              <stop offset="100%" stopColor="#003D73" />
-            </linearGradient>
-          </defs>
-          <rect x={yLabelW + xValues.length * cellW + 8} y={18} width={14} height={yValues.length * cellH} rx={4} fill="url(#hm-grad)" />
-          <text x={yLabelW + xValues.length * cellW + 15} y={16} textAnchor="middle" fontSize={8} fill="#6E7191">{maxZ}</text>
-          <text x={yLabelW + xValues.length * cellW + 15} y={22 + yValues.length * cellH} textAnchor="middle" fontSize={8} fill="#6E7191">{minZ}</text>
-        </svg>
+        </div>
+
+        {/* Horizontal legend bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 56, paddingTop: 6, paddingBottom: 2 }}>
+          <span style={{ fontSize: 9, color: '#6E7191' }}>{minZ}</span>
+          <div style={{
+            flex: 1, maxWidth: 200, height: 8, borderRadius: 4,
+            background: 'linear-gradient(90deg, rgba(0,102,204,0.08), rgba(0,102,204,0.5), rgba(0,61,115,0.95))',
+          }} />
+          <span style={{ fontSize: 9, color: '#6E7191' }}>{maxZ.toLocaleString()}</span>
+        </div>
       </div>
     )
   }
