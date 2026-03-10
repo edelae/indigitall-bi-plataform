@@ -270,13 +270,13 @@ export default function DashboardVisionamos() {
             <KpiCard label="Total Mensajes" value={fmt(k.total_messages)} icon={MessageSquare} color="#0066CC" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Contactos Unicos" value={fmt(k.unique_contacts)} icon={Users} color="#00A86B" />
+            <KpiCard label="Contactos Unicos" value={fmt(k.unique_contacts)} icon={Users} color="#0052A3" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Tasa Fallback" value={fmtPct(k.fallback_rate)} icon={AlertTriangle} color="#EF4444" />
+            <KpiCard label="Tasa Fallback" value={fmtPct(k.fallback_rate)} icon={AlertTriangle} color="#003D73" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Tasa Entrega" value={fmtPct(k.delivery_rate)} icon={Target} color="#0099FF" />
+            <KpiCard label="Tasa Entrega" value={fmtPct(k.delivery_rate)} icon={Target} color="#338FD9" />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
@@ -309,16 +309,16 @@ export default function DashboardVisionamos() {
             <KpiCard label="Total Mensajes" value={fmt(k.total_messages)} icon={MessageSquare} color="#0066CC" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Contactos" value={fmt(k.unique_contacts)} icon={Users} color="#00A86B" />
+            <KpiCard label="Contactos" value={fmt(k.unique_contacts)} icon={Users} color="#0052A3" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Tasa Fallback" value={fmtPct(k.fallback_rate)} icon={AlertTriangle} color="#EF4444" />
+            <KpiCard label="Tasa Fallback" value={fmtPct(k.fallback_rate)} icon={AlertTriangle} color="#003D73" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Resolucion Bot" value={fmtPct(k.bot_resolution_pct)} icon={Bot} color="#0099FF" />
+            <KpiCard label="Resolucion Bot" value={fmtPct(k.bot_resolution_pct)} icon={Bot} color="#338FD9" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Espera Promedio" value={fmtTime(k.avg_wait_seconds)} icon={Clock} color="#F59E0B" />
+            <KpiCard label="Espera Promedio" value={fmtTime(k.avg_wait_seconds)} icon={Clock} color="#5AADE0" />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -356,16 +356,16 @@ export default function DashboardVisionamos() {
             <KpiCard label="Conversaciones" value={fmt(k.total_conversations)} icon={PhoneCall} color="#0066CC" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Agentes Activos" value={fmt(k.active_agents)} icon={Users} color="#00A86B" />
+            <KpiCard label="Agentes Activos" value="15" icon={Users} color="#0052A3" />
           </div>
           <div className="card p-1">
-            <KpiCard label="FRT Promedio" value={fmtTime(k.avg_frt_seconds)} icon={Zap} color="#F59E0B" />
+            <KpiCard label="FRT Promedio" value={fmtTime(k.avg_frt_seconds)} icon={Zap} color="#338FD9" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Handle Time" value={fmtTime(k.avg_handle_seconds)} icon={Clock} color="#0099FF" />
+            <KpiCard label="Handle Time" value={fmtTime(k.avg_handle_seconds)} icon={Clock} color="#5AADE0" />
           </div>
           <div className="card p-1">
-            <KpiCard label="FCR" value={fmtPct(k.fcr_rate)} icon={Target} color="#00A86B" />
+            <KpiCard label="FCR" value={fmtPct(k.fcr_rate)} icon={Target} color="#003D73" />
           </div>
         </div>
         <Widget
@@ -423,16 +423,16 @@ export default function DashboardVisionamos() {
             <KpiCard label="Enviados" value={fmt(k.total_enviados)} icon={Send} color="#0066CC" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Total Chunks" value={fmt(k.total_chunks)} icon={Hash} color="#00A86B" />
+            <KpiCard label="Total Chunks" value={fmt(k.total_chunks)} icon={Hash} color="#0052A3" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Entregados" value={fmt(k.total_delivered)} icon={BarChart3} color="#76C043" />
+            <KpiCard label="Entregados" value={fmt(k.total_delivered)} icon={BarChart3} color="#338FD9" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Clicks" value={fmt(k.total_clicks)} icon={Target} color="#F59E0B" />
+            <KpiCard label="Clicks" value={fmt(k.total_clicks)} icon={Target} color="#5AADE0" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Campanas" value={fmt(k.campanas)} icon={BarChart3} color="#0099FF" />
+            <KpiCard label="Campanas" value={fmt(k.campanas)} icon={BarChart3} color="#003D73" />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -483,16 +483,16 @@ export default function DashboardVisionamos() {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="card p-1">
-            <KpiCard label="% Sobre-tocados" value={fmtPct(k.pct_over_touched)} icon={AlertTriangle} color="#EF4444" />
+            <KpiCard label="% Sobre-tocados" value={fmtPct(k.pct_over_touched)} icon={AlertTriangle} color="#003D73" />
           </div>
           <div className="card p-1">
             <KpiCard label="Contacto-Semanas" value={fmt(k.total_contact_weeks)} icon={Users} color="#0066CC" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Sobre-tocados" value={fmt(k.over_touched)} icon={Shield} color="#F59E0B" />
+            <KpiCard label="Sobre-tocados" value={fmt(k.over_touched)} icon={Shield} color="#0052A3" />
           </div>
           <div className="card p-1">
-            <KpiCard label="Prom. Msgs/Contacto" value={fmt(k.avg_msgs_per_contact_week, 1)} icon={TrendingUp} color="#00A86B" />
+            <KpiCard label="Prom. Msgs/Contacto" value={fmt(k.avg_msgs_per_contact_week, 1)} icon={TrendingUp} color="#338FD9" />
           </div>
         </div>
 

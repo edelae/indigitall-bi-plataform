@@ -145,28 +145,28 @@ export type ChartType =
   | 'funnel' | 'treemap' | 'gauge'
   | 'histogram' | 'table' | 'kpi'
 
-// InDigitall institutional palette — PROMPT 3
+// Monochromatic blue palette — inDigitall brand
 export const CHART_COLORS = [
   '#0066CC', // azul primario
-  '#00A86B', // verde secundario
-  '#0099FF', // azul claro
-  '#005299', // azul oscuro
-  '#33BB88', // verde claro
-  '#003D73', // azul muy oscuro
-  '#66CCFF', // azul muy claro
-  '#007A50', // verde oscuro
-  '#99DDFF', // azul pastel
-  '#00CC88', // verde brillante
+  '#338FD9', // azul medio
+  '#0052A3', // azul oscuro
+  '#5AADE0', // azul claro
+  '#003D73', // azul profundo
+  '#80C4E8', // azul suave
+  '#1A7AD4', // azul intermedio
+  '#004D8C', // azul marino
+  '#A6D6EF', // azul pastel
+  '#002B54', // azul noche
 ]
 
 export const PRIMARY_COLOR = '#0066CC'
-export const SECONDARY_COLOR = '#00A86B'
+export const SECONDARY_COLOR = '#0052A3'
 
 // Named color palettes for per-widget customization
 export const COLOR_PALETTES: Record<string, { name: string; colors: string[] }> = {
   indigitall: { name: 'InDigitall', colors: CHART_COLORS },
   warm: { name: 'Calido', colors: ['#FF6B35', '#F7C948', '#FF4757', '#FF9F43', '#EE5A24', '#D35400', '#F39C12', '#E74C3C', '#FDCB6E', '#F8B739'] },
-  cool: { name: 'Frio', colors: ['#4A90D9', '#5352ED', '#70A1FF', '#1E90FF', '#6C5CE7', '#A29BFE', '#48DBFB', '#0ABDE3', '#74B9FF', '#55E6C1'] },
+  cool: { name: 'Azul Monocromático', colors: ['#0066CC', '#338FD9', '#0052A3', '#5AADE0', '#003D73', '#80C4E8', '#1A7AD4', '#004D8C', '#A6D6EF', '#002B54'] },
   nature: { name: 'Natural', colors: ['#2ECC71', '#27AE60', '#1ABC9C', '#16A085', '#3D9970', '#2ECC40', '#01A66F', '#00B894', '#55E6C1', '#7BED9F'] },
   corporate: { name: 'Corporativo', colors: ['#2C3E50', '#34495E', '#7F8C8D', '#95A5A6', '#BDC3C7', '#1E88E5', '#546E7A', '#455A64', '#78909C', '#90A4AE'] },
   vibrant: { name: 'Vibrante', colors: ['#E91E63', '#9C27B0', '#3F51B5', '#00BCD4', '#4CAF50', '#FF9800', '#F44336', '#673AB7', '#009688', '#FFC107'] },

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
   Sparkles, Send, X, Loader2, ChevronDown, ChevronUp,
@@ -176,13 +177,14 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
 
   // Collapsed floating button
   if (minimized) {
-    return (
+    return createPortal(
       <button
         onClick={() => setMinimized(false)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full shadow-lg transition-all hover:scale-105"
+        className="fixed bottom-6 right-6 z-[9999] flex items-center gap-2 px-4 py-3 rounded-full shadow-lg transition-all hover:scale-105"
         style={{
           backgroundColor: '#0066CC',
           color: 'white',
+          fontFamily: 'Inter, sans-serif',
           boxShadow: '0 4px 20px rgba(0, 102, 204, 0.4)',
         }}
       >
@@ -194,13 +196,14 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
             {messages.filter(m => m.role === 'assistant').length}
           </span>
         )}
-      </button>
+      </button>,
+      document.body
     )
   }
 
-  return (
+  return createPortal(
     <div
-      className="fixed bottom-6 right-6 z-40 flex flex-col overflow-hidden"
+      className="fixed bottom-6 right-6 z-[9999] flex flex-col overflow-hidden"
       style={{
         width: 400,
         height: 520,
@@ -208,6 +211,7 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
         backgroundColor: 'var(--bg-card)',
         border: '1px solid var(--border)',
         borderRadius: 16,
+        fontFamily: 'Inter, sans-serif',
         boxShadow: '0 8px 40px rgba(0, 0, 0, 0.15)',
       }}
     >
@@ -339,6 +343,7 @@ export default function DashboardAnalyst({ context, onClose }: Props) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

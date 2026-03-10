@@ -249,6 +249,22 @@ class ContactCenterService:
         )
         return self._exec(stmt)
 
+    # Visionamos agent emails — the 15 real agents
+    VISIONAMOS_AGENTS = [
+        "jmartinez@visionamos.com", "eamaya@visionamos.com",
+        "jhenao@visionamos.com", "amarin@visionamos.com",
+        "nmazo@visionamos.com", "jguerrero@visionamos.com",
+        "vvalencia@visionamos.com", "acano@visionamos.com",
+        "ypineda@visionamos.com", "arua@visionamos.com",
+        "vvelez@visionamos.com", "auribe@visionamos.com",
+        "yzapata@visionamos.com", "carboleda@visionamos.com",
+        "jurrego@visionamos.com",
+    ]
+
+    def _visionamos_agent_filter(self, t):
+        """Filter to only Visionamos agents by email."""
+        return t.c.agent_email.in_(self.VISIONAMOS_AGENTS)
+
     def get_agent_performance_table(
         self,
         tenant_filter: Optional[str] = None,
@@ -256,22 +272,23 @@ class ContactCenterService:
         end_date: Optional[date_type] = None,
         limit: int = 20,
     ) -> pd.DataFrame:
-        """Expanded agent performance with FRT and handle time, joined with agents table."""
+        """Agent performance for Visionamos agents only, using agent_email."""
         t = ChatConversation.__table__
         w = and_(
             self._base_where(t, tenant_filter, start_date, end_date),
             t.c.agent_id.isnot(None),
+            self._visionamos_agent_filter(t),
         )
         stmt = (
             select(
-                t.c.agent_id.label("agente"),
+                t.c.agent_email.label("agente"),
                 func.count().label("conversaciones"),
                 func.count(func.distinct(t.c.contact_id)).label("contactos"),
                 func.avg(t.c.wait_time_seconds).label("avg_frt"),
                 func.avg(t.c.handle_time_seconds).label("avg_handle"),
             )
             .where(w)
-            .group_by(t.c.agent_id)
+            .group_by(t.c.agent_email)
             .order_by(func.count().desc())
             .limit(limit)
         )
@@ -279,6 +296,8 @@ class ContactCenterService:
         if not df.empty:
             df["avg_frt"] = df["avg_frt"].round(0).fillna(0).astype(int)
             df["avg_handle"] = df["avg_handle"].round(0).fillna(0).astype(int)
+            # Clean email to show just the name part
+            df["agente"] = df["agente"].str.replace("@visionamos.com", "", regex=False)
         return df
 
     def get_conversation_drill_data(
