@@ -192,8 +192,10 @@ export default function DashboardVisionamos() {
       fetch_<DfResponse>('cc/handle-trend'),
       fetch_<DfResponse>('cc/hourly-queue'),
       fetch_<DfResponse>('cc/conv-type-trend'),
-    ]).then(([kpis, agents, reasons, trend, frt, handle, queue, convTypeTrend]) => {
-      setCc({ data: { kpis, agents, reasons, trend, frt, handle, queue, convTypeTrend }, loading: false, error: null, fetched: true })
+      fetch_<DfResponse>('cc/dead-time-trend'),
+      fetch_<DfResponse>('cc/wait-distribution'),
+    ]).then(([kpis, agents, reasons, trend, frt, handle, queue, convTypeTrend, deadTime, waitDist]) => {
+      setCc({ data: { kpis, agents, reasons, trend, frt, handle, queue, convTypeTrend, deadTime, waitDist }, loading: false, error: null, fetched: true })
     }).catch(e => setCc({ data: null, loading: false, error: e.message, fetched: true }))
   }, [activeTab, cc.fetched])
 
@@ -393,6 +395,14 @@ export default function DashboardVisionamos() {
           </Widget>
           <Widget title="Tipo Conversacion (Bot/Humano/Mixta)" className="min-h-[300px]">
             {renderChart(cc.data.convTypeTrend, 'area_stacked', 260)}
+          </Widget>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <Widget title="Tendencia Dead Time" className="min-h-[300px]">
+            {renderChart(cc.data.deadTime, 'line', 260)}
+          </Widget>
+          <Widget title="Distribucion Tiempo de Espera" className="min-h-[300px]">
+            {renderChart(cc.data.waitDist, 'bar', 260)}
           </Widget>
         </div>
       </div>
