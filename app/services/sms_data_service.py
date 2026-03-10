@@ -1,8 +1,13 @@
-"""SMS Data Service — Queries for sms_envios (250K+ records).
+"""SMS Data Service — Queries for sms_envios + sms_daily_stats.
 
-Available columns in sms_envios:
-  id, tenant_id, sending_id, application_id, campaign_id,
+sms_envios columns: id, tenant_id, sending_id, application_id, campaign_id,
   total_chunks, sending_type, is_flash, sent_at
+  NOTE: total_chunks is NULL for all rows (API doesn't return per-send chunks).
+
+sms_daily_stats columns: id, tenant_id, application_id, date,
+  total_sent, total_delivered, total_rejected, total_chunks,
+  total_clicks, unique_contacts, total_cost
+  NOTE: This table has actual chunk/delivery/click data from /v2/sms/stats/application.
 """
 
 import pandas as pd
@@ -11,7 +16,7 @@ from sqlalchemy import select, func, and_, text
 from typing import Optional, Dict, Any, Tuple
 
 from app.models.database import engine
-from app.models.schemas import SmsEnvio
+from app.models.schemas import SmsEnvio, SmsDailyStat
 
 
 class SmsDataService:
@@ -30,32 +35,51 @@ class SmsDataService:
             w = and_(func.date(t.c.sent_at) >= start_date, func.date(t.c.sent_at) <= end_date)
         return w
 
+    def _daily_where(self, d, start_date, end_date):
+        w = True
+        if start_date and end_date:
+            w = and_(d.c.date >= start_date, d.c.date <= end_date)
+        return w
+
     def get_sms_kpis(
         self,
         start_date: Optional[date_type] = None,
         end_date: Optional[date_type] = None,
     ) -> Dict[str, Any]:
-        """KPIs from actual sms_envios columns: enviados, chunks, campanas."""
+        """KPIs combining sms_envios (campaigns) + sms_daily_stats (chunks, delivery, clicks)."""
         empty = {
-            "total_enviados": 0, "total_chunks": 0,
-            "campanas": 0, "tipos_envio": 0,
+            "total_enviados": 0, "total_chunks": 0, "total_delivered": 0,
+            "total_clicks": 0, "campanas": 0, "tipos_envio": 0,
         }
         try:
+            # Campaigns and sending types from sms_envios
             t = SmsEnvio.__table__
             w = self._base_where(t, start_date, end_date)
-            stmt = select(
+            stmt1 = select(
                 func.count().label("total_enviados"),
-                func.coalesce(func.sum(t.c.total_chunks), 0).label("total_chunks"),
                 func.count(func.distinct(t.c.campaign_id)).label("campanas"),
                 func.count(func.distinct(t.c.sending_type)).label("tipos_envio"),
             ).where(w)
+
+            # Chunks, delivered, clicks from sms_daily_stats
+            d = SmsDailyStat.__table__
+            dw = self._daily_where(d, start_date, end_date)
+            stmt2 = select(
+                func.coalesce(func.sum(d.c.total_chunks), 0).label("total_chunks"),
+                func.coalesce(func.sum(d.c.total_delivered), 0).label("total_delivered"),
+                func.coalesce(func.sum(d.c.total_clicks), 0).label("total_clicks"),
+            ).where(dw)
+
             with engine.connect() as conn:
-                row = conn.execute(stmt).first()
+                r1 = conn.execute(stmt1).first()
+                r2 = conn.execute(stmt2).first()
             return {
-                "total_enviados": row.total_enviados or 0,
-                "total_chunks": row.total_chunks or 0,
-                "campanas": row.campanas or 0,
-                "tipos_envio": row.tipos_envio or 0,
+                "total_enviados": r1.total_enviados or 0,
+                "total_chunks": r2.total_chunks or 0,
+                "total_delivered": r2.total_delivered or 0,
+                "total_clicks": r2.total_clicks or 0,
+                "campanas": r1.campanas or 0,
+                "tipos_envio": r1.tipos_envio or 0,
             }
         except Exception:
             return empty
@@ -65,19 +89,18 @@ class SmsDataService:
         start_date: Optional[date_type] = None,
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
-        """Daily sends vs chunks."""
-        t = SmsEnvio.__table__
-        w = self._base_where(t, start_date, end_date)
-        date_col = func.date(t.c.sent_at).label("date")
+        """Daily sends vs chunks from sms_daily_stats (has real chunk data)."""
+        d = SmsDailyStat.__table__
+        dw = self._daily_where(d, start_date, end_date)
         stmt = (
             select(
-                date_col,
-                func.count().label("enviados"),
-                func.coalesce(func.sum(t.c.total_chunks), 0).label("chunks"),
+                d.c.date.label("date"),
+                func.coalesce(func.sum(d.c.total_sent), 0).label("enviados"),
+                func.coalesce(func.sum(d.c.total_chunks), 0).label("chunks"),
             )
-            .where(w)
-            .group_by(date_col)
-            .order_by(date_col)
+            .where(dw)
+            .group_by(d.c.date)
+            .order_by(d.c.date)
         )
         return self._exec(stmt)
 
@@ -86,8 +109,23 @@ class SmsDataService:
         start_date: Optional[date_type] = None,
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
-        """Daily sends and chunks trend (clicks not available in sms_envios)."""
-        return self.get_sends_vs_chunks_trend(start_date, end_date)
+        """Daily sends, clicks and CTR from sms_daily_stats."""
+        d = SmsDailyStat.__table__
+        dw = self._daily_where(d, start_date, end_date)
+        stmt = (
+            select(
+                d.c.date.label("date"),
+                func.coalesce(func.sum(d.c.total_sent), 0).label("enviados"),
+                func.coalesce(func.sum(d.c.total_clicks), 0).label("clicks"),
+            )
+            .where(dw)
+            .group_by(d.c.date)
+            .order_by(d.c.date)
+        )
+        df = self._exec(stmt)
+        if not df.empty:
+            df["ctr"] = (df["clicks"] / df["enviados"].replace(0, 1) * 100).round(2)
+        return df
 
     def get_campaign_ranking(
         self,
@@ -223,24 +261,24 @@ class SmsDataService:
         end_date: Optional[date_type] = None,
         granularity: str = "month",
     ) -> pd.DataFrame:
-        """Aggregated SMS counts for drill-down (month/week/day)."""
-        t = SmsEnvio.__table__
-        w = self._base_where(t, start_date, end_date)
+        """Aggregated SMS counts for drill-down (month/week/day) from sms_daily_stats."""
+        d = SmsDailyStat.__table__
+        dw = self._daily_where(d, start_date, end_date)
 
         if granularity == "month":
-            period = func.to_char(t.c.sent_at, "YYYY-MM").label("period")
+            period = func.to_char(d.c.date, "YYYY-MM").label("period")
         elif granularity == "week":
-            period = func.to_char(t.c.sent_at, "IYYY-\"W\"IW").label("period")
+            period = func.to_char(d.c.date, "IYYY-\"W\"IW").label("period")
         else:
-            period = func.date(t.c.sent_at).label("period")
+            period = d.c.date.label("period")
 
         stmt = (
             select(
                 period,
-                func.count().label("total"),
-                func.coalesce(func.sum(t.c.total_chunks), 0).label("chunks"),
+                func.coalesce(func.sum(d.c.total_sent), 0).label("total"),
+                func.coalesce(func.sum(d.c.total_chunks), 0).label("chunks"),
             )
-            .where(w)
+            .where(dw)
             .group_by(period)
             .order_by(period)
         )

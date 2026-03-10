@@ -406,18 +406,21 @@ export default function DashboardVisionamos() {
     const k = sms.data.kpis
     return (
       <div className="space-y-3">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
             <KpiCard label="Enviados" value={fmt(k.total_enviados)} icon={Send} color="#0066CC" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
             <KpiCard label="Total Chunks" value={fmt(k.total_chunks)} icon={Hash} color="#00A86B" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
-            <KpiCard label="Campanas" value={fmt(k.campanas)} icon={BarChart3} color="#0099FF" />
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+            <KpiCard label="Entregados" value={fmt(k.total_delivered)} icon={BarChart3} color="#76C043" />
           </div>
-          <div className="bg-white rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
-            <KpiCard label="Tipos de Envio" value={fmt(k.tipos_envio)} icon={Target} color="#F59E0B" />
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+            <KpiCard label="Clicks" value={fmt(k.total_clicks)} icon={Target} color="#F59E0B" />
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] p-1">
+            <KpiCard label="Campanas" value={fmt(k.campanas)} icon={BarChart3} color="#0099FF" />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
