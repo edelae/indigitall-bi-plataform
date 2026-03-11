@@ -7,6 +7,7 @@ import DashboardList from './pages/DashboardList'
 import DashboardBuilder from './pages/DashboardBuilder'
 import DashboardView from './pages/DashboardView'
 import DashboardVisionamos from './pages/DashboardVisionamos'
+import DashboardWhatsAppNPS from './pages/DashboardWhatsAppNPS'
 import DataExplorer from './pages/DataExplorer'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/tableros" element={<DashboardList />} />
         <Route path="/tableros/nuevo" element={<DashboardBuilder />} />
         <Route path="/tableros/visionamos" element={<DashboardVisionamos />} />
+        <Route path="/tableros/whatsapp-nps" element={<DashboardWhatsAppNPS />} />
         <Route path="/tableros/saved/:id" element={<DashboardView />} />
         <Route path="/datos" element={<DataExplorer />} />
       </Route>

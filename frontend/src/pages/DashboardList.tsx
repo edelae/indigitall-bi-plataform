@@ -4,6 +4,7 @@ import {
   LayoutGrid, Plus, Search, Star, Archive,
   Clock, Loader2, Pencil, Eye, Zap,
   MessageSquare, Headphones, Send, Shield,
+  Bot, ThumbsUp,
 } from 'lucide-react'
 import { listDashboards, toggleDashboardFavorite, archiveDashboard } from '../api/client'
 import type { Dashboard, DashboardWidget } from '../types'
@@ -187,14 +188,6 @@ export default function DashboardList() {
         <div className="flex items-center justify-center py-16">
           <Loader2 size={24} className="animate-spin text-primary" />
         </div>
-      ) : dashboards.length === 0 ? (
-        <div className="text-center py-16">
-          <LayoutGrid size={48} className="text-text-light mx-auto mb-3" />
-          <p className="text-text-muted">No hay tableros creados</p>
-          <Link to="/tableros/nuevo" className="btn-primary mt-4 inline-flex items-center gap-1.5 text-sm no-underline">
-            <Plus size={14} /> Crear tablero
-          </Link>
-        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {/* Visionamos — predefined live dashboard */}
@@ -234,6 +227,48 @@ export default function DashboardList() {
               <div className="flex items-center gap-2 text-[11px] text-text-light">
                 <span className="badge badge-info">5 tabs</span>
                 <span className="badge badge-success">Datos reales</span>
+              </div>
+            </div>
+          </div>
+
+          {/* WhatsApp NPS & Bot — predefined analytics dashboard */}
+          <div
+            onClick={() => navigate('/tableros/whatsapp-nps')}
+            className="card overflow-hidden cursor-pointer hover:shadow-card-hover transition-all relative"
+          >
+            <div className="h-40 relative overflow-hidden bg-gradient-to-br from-[#003D73] to-[#0066CC] flex items-center justify-center">
+              <div className="absolute inset-0 opacity-10">
+                <svg viewBox="0 0 200 120" className="w-full h-full">
+                  <polyline points="10,90 50,40 90,60 130,20 170,50" fill="none" stroke="white" strokeWidth="4" />
+                  <rect x="20" y="70" width="20" height="40" rx="3" fill="white" />
+                  <rect x="60" y="50" width="20" height="60" rx="3" fill="white" />
+                  <rect x="100" y="30" width="20" height="80" rx="3" fill="white" />
+                  <rect x="140" y="60" width="20" height="50" rx="3" fill="white" />
+                </svg>
+              </div>
+              <div className="text-center relative z-10">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <MessageSquare size={20} className="text-white" />
+                  <span className="text-white font-bold text-lg">NPS & Bot</span>
+                </div>
+                <div className="flex items-center justify-center gap-3 mt-2">
+                  {[ThumbsUp, Bot, Star, MessageSquare].map((Icon, i) => (
+                    <div key={i} className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
+                      <Icon size={13} className="text-white" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="flex items-start justify-between mb-1">
+                <h3 className="font-semibold text-sm text-text-dark">WhatsApp Analytics — NPS & Bot</h3>
+                <span className="badge badge-primary text-[10px]">En vivo</span>
+              </div>
+              <p className="text-xs text-text-muted mb-2">Encuestas de satisfaccion NPS por canal y analisis de fallbacks del bot</p>
+              <div className="flex items-center gap-2 text-[11px] text-text-light">
+                <span className="badge badge-info">2 tabs</span>
+                <span className="badge badge-success">NPS + Fallbacks</span>
               </div>
             </div>
           </div>

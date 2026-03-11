@@ -11,6 +11,7 @@ from app.services.data_service import DataService
 from app.services.contact_center_service import ContactCenterService
 from app.services.sms_data_service import SmsDataService
 from app.services.general_dashboard_service import GeneralDashboardService
+from app.services.nps_data_service import NpsDataService
 from app.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
@@ -477,6 +478,122 @@ async def general_delivery_funnel(
     t = tenant or settings.DEFAULT_TENANT
     s, e = parse_dates(start_date, end_date)
     return df_to_response(svc.get_delivery_funnel(t, s, e))
+
+
+# ─── NPS ──────────────────────────────────────────────────────────
+
+@router.get("/nps/kpis")
+async def nps_kpis(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return sanitize(svc.get_nps_kpis(t, s, e))
+
+
+@router.get("/nps/trend")
+async def nps_trend(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+    period: str = "month",
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return df_to_response(svc.get_nps_trend_pivoted(t, s, e, period))
+
+
+@router.get("/nps/by-canal")
+async def nps_by_canal(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+    period: str = "month",
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return df_to_response(svc.get_nps_by_canal(t, s, e, period))
+
+
+@router.get("/nps/by-entity")
+async def nps_by_entity(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+    limit: int = 15,
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return df_to_response(svc.get_nps_by_entity(t, s, e, limit))
+
+
+@router.get("/nps/distribution")
+async def nps_distribution(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return df_to_response(svc.get_nps_distribution(t, s, e))
+
+
+@router.get("/nps/intent-vs-canal")
+async def nps_intent_vs_canal(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+    limit: int = 10,
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return df_to_response(svc.get_intent_vs_canal(t, s, e, limit))
+
+
+@router.get("/nps/fallback-trend")
+async def nps_fallback_trend(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+    period: str = "month",
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return df_to_response(svc.get_fallback_trend(t, s, e, period))
+
+
+@router.get("/nps/fallback-by-intent")
+async def nps_fallback_by_intent(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+    limit: int = 15,
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return df_to_response(svc.get_fallback_by_intent(t, s, e, limit))
+
+
+@router.get("/nps/bot-kpis")
+async def nps_bot_kpis(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    tenant: Optional[str] = None,
+):
+    svc = NpsDataService()
+    t = tenant or settings.DEFAULT_TENANT
+    s, e = parse_dates(start_date, end_date)
+    return sanitize(svc.get_bot_kpis(t, s, e))
 
 
 # ─── Home ─────────────────────────────────────────────────────────

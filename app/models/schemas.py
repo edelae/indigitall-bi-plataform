@@ -464,6 +464,39 @@ class Dashboard(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class NpsSurvey(Base):
+    """NPS survey responses extracted from inDigitall chat flow responses."""
+    __tablename__ = "nps_surveys"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Text, nullable=False)
+    message_date = Column(TIMESTAMP(timezone=True))
+    date = Column(Date, nullable=False)
+    hour = Column(String(5))
+    day_of_week = Column(String(10))
+    month_label = Column(String(10))
+    contact_name = Column(String(255))
+    contact_id = Column(String(100))
+    entity = Column(String(200))
+    score_atencion = Column(SmallInteger)
+    score_asesor = Column(SmallInteger)
+    rapida = Column(SmallInteger)
+    resuelto = Column(SmallInteger)
+    volveria = Column(SmallInteger)
+    nps_categoria = Column(String(20))
+    comentario = Column(Text)
+    agent_id = Column(String(100))
+    conversation_id = Column(String(100))
+    close_reason = Column(String(100))
+    canal_tipo = Column(String(20))
+
+    __table_args__ = (
+        Index("idx_nps_surveys_tenant_date", "tenant_id", "date"),
+        Index("idx_nps_surveys_canal", "tenant_id", "canal_tipo"),
+        Index("idx_nps_surveys_entity", "tenant_id", "entity"),
+    )
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
 
