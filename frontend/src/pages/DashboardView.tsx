@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, Component, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle, Calendar, Filter, ChevronDown } from 'lucide-react'
+import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle, Calendar, Filter, ChevronDown, Settings2 } from 'lucide-react'
 import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
@@ -70,6 +70,26 @@ export default function DashboardView() {
   const [dashFilters, setDashFilters] = useState<DashboardFilter[]>([])
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   const [filterLoading, setFilterLoading] = useState(false)
+
+  // Per-widget column overrides (local state, not persisted)
+  const [widgetColumnOverrides, setWidgetColumnOverrides] = useState<
+    Record<string, { xColumn?: string; yColumns?: string[]; groupByColumn?: string }>
+  >({})
+  const [configOpenWidget, setConfigOpenWidget] = useState<string | null>(null)
+
+  const setWidgetOverride = (widgetId: string, key: 'xColumn' | 'yColumns' | 'groupByColumn', value: any) => {
+    setWidgetColumnOverrides(prev => ({
+      ...prev,
+      [widgetId]: { ...prev[widgetId], [key]: value },
+    }))
+  }
+
+  const toggleYColumn = (widgetId: string, col: string, currentYCols: string[]) => {
+    const next = currentYCols.includes(col)
+      ? currentYCols.filter(c => c !== col)
+      : [...currentYCols, col]
+    if (next.length > 0) setWidgetOverride(widgetId, 'yColumns', next)
+  }
 
   useEffect(() => {
     if (!id) return
@@ -486,12 +506,76 @@ export default function DashboardView() {
                                 style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter', color: textColor }}>
                                 {w.custom_title || w.title}
                               </span>
-                              <button onClick={() => setInfoModal(w)}
-                                className="p-1 hover:bg-black/10 rounded-md transition-colors" title="Ver info">
-                                <Info size={12} style={{ color: textColor === '#FFFFFF' || textColor === '#F9FAFB' ? 'rgba(255,255,255,0.5)' : '#9CA3AF' }} />
-                              </button>
+                              <div className="flex items-center gap-0.5">
+                                {/* Variable selector toggle — only for chart widgets (not KPIs) */}
+                                {!isKpiWidget(w) && w.data && w.data.length > 0 && w.columns && w.columns.length >= 2 && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setConfigOpenWidget(configOpenWidget === w.grid_i ? null : w.grid_i) }}
+                                    className={`p-1 rounded-md transition-colors ${configOpenWidget === w.grid_i ? 'bg-[#1E88E5]/15' : 'hover:bg-black/10'}`}
+                                    title="Configurar ejes">
+                                    <Settings2 size={12} style={{ color: configOpenWidget === w.grid_i ? '#1E88E5' : (textColor === '#FFFFFF' || textColor === '#F9FAFB' ? 'rgba(255,255,255,0.5)' : '#9CA3AF') }} />
+                                  </button>
+                                )}
+                                <button onClick={() => setInfoModal(w)}
+                                  className="p-1 hover:bg-black/10 rounded-md transition-colors" title="Ver info">
+                                  <Info size={12} style={{ color: textColor === '#FFFFFF' || textColor === '#F9FAFB' ? 'rgba(255,255,255,0.5)' : '#9CA3AF' }} />
+                                </button>
+                              </div>
                             </div>
                           )}
+
+                          {/* Variable selector panel */}
+                          {configOpenWidget === w.grid_i && w.columns && w.columns.length >= 2 && (() => {
+                            const ovr = widgetColumnOverrides[w.grid_i] || {}
+                            const curX = ovr.xColumn || w.x_column || w.columns[0]
+                            const curY = ovr.yColumns || w.y_columns || w.columns.filter((c: string) => c !== curX)
+                            const curG = ovr.groupByColumn ?? w.group_by_column ?? ''
+                            return (
+                              <div className="px-3 py-2 bg-[#F9FAFB] border-b border-[#E5E7EB] flex-shrink-0"
+                                onClick={e => e.stopPropagation()}>
+                                <div className="flex flex-wrap items-start gap-3">
+                                  {/* X Axis */}
+                                  <div className="min-w-0">
+                                    <label className="text-[9px] font-bold text-[#6B7280] uppercase tracking-wider block mb-0.5">Eje X</label>
+                                    <select value={curX}
+                                      onChange={e => setWidgetOverride(w.grid_i, 'xColumn', e.target.value)}
+                                      className="text-[11px] border border-[#D1D5DB] rounded px-1.5 py-0.5 bg-white text-[#374151] max-w-[140px]">
+                                      {w.columns.map((c: string) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+                                    </select>
+                                  </div>
+                                  {/* Y Values */}
+                                  <div className="min-w-0">
+                                    <label className="text-[9px] font-bold text-[#6B7280] uppercase tracking-wider block mb-0.5">Valores Y</label>
+                                    <div className="flex flex-wrap gap-1 max-h-14 overflow-y-auto">
+                                      {w.columns.filter((c: string) => c !== curX && c !== curG).map((c: string) => (
+                                        <button key={c}
+                                          onClick={() => toggleYColumn(w.grid_i, c, curY)}
+                                          className={`px-1.5 py-0.5 rounded text-[10px] border transition-all ${
+                                            curY.includes(c)
+                                              ? 'border-[#1E88E5] bg-[#1E88E5]/10 text-[#1E88E5] font-medium'
+                                              : 'border-[#E5E7EB] bg-white text-[#9CA3AF] hover:border-[#1E88E5]/30'
+                                          }`}>
+                                          {c.replace(/_/g, ' ')}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  {/* Group by */}
+                                  <div className="min-w-0">
+                                    <label className="text-[9px] font-bold text-[#6B7280] uppercase tracking-wider block mb-0.5">Agrupar</label>
+                                    <select value={curG}
+                                      onChange={e => setWidgetOverride(w.grid_i, 'groupByColumn', e.target.value || undefined)}
+                                      className="text-[11px] border border-[#D1D5DB] rounded px-1.5 py-0.5 bg-white text-[#374151] max-w-[140px]">
+                                      <option value="">Ninguna</option>
+                                      {w.columns.filter((c: string) => c !== curX).map((c: string) => (
+                                        <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })()}
 
                           {/* Widget content */}
                           <div className={`flex-1 overflow-hidden flex flex-col ${isClickable(w) ? 'cursor-pointer transition-colors' : ''}`}
@@ -517,8 +601,9 @@ export default function DashboardView() {
                                     showLegend={w.show_legend !== false}
                                     fontFamily={w.font_family} axisFontSize={w.axis_font_size}
                                     legendFontSize={w.legend_font_size}
-                                    xColumn={w.x_column} yColumns={w.y_columns}
-                                    groupByColumn={w.group_by_column} />
+                                    xColumn={widgetColumnOverrides[w.grid_i]?.xColumn || w.x_column}
+                                    yColumns={widgetColumnOverrides[w.grid_i]?.yColumns || w.y_columns}
+                                    groupByColumn={widgetColumnOverrides[w.grid_i]?.groupByColumn ?? w.group_by_column} />
                                 </div>
                               </div>
                             ) : w.data && w.data.length > 0 ? (
