@@ -559,42 +559,50 @@ export function transformDataGranularity(
   if (!dateCol) return null
 
   const numCols = columns.filter(c => c !== dateCol && data.some(r => typeof r[c] === 'number'))
-  const otherCols = columns.filter(c => c !== dateCol && !numCols.includes(c))
+  const catCols = columns.filter(c => c !== dateCol && !numCols.includes(c))
 
-  const groups = new Map<string, { sortKey: number; rows: Record<string, any>[] }>()
+  // Group by compound key: dateGranularity + all categorical columns
+  // This preserves legend/grouping (e.g. direction, canal, tipo)
+  const groups = new Map<string, { sortKey: number; rows: Record<string, any>[]; catValues: Record<string, any> }>()
 
   for (const row of data) {
     const d = new Date(row[dateCol])
     if (isNaN(d.getTime())) continue
 
-    let key: string, sortKey: number
+    let dateKey: string, sortKey: number
     switch (granularity) {
       case 'dia_semana': {
         const dow = (d.getDay() + 6) % 7
-        key = DAY_NAMES[dow]; sortKey = dow; break
+        dateKey = DAY_NAMES[dow]; sortKey = dow; break
       }
       case 'mes': {
-        key = MONTH_NAMES[d.getMonth()]; sortKey = d.getMonth(); break
+        dateKey = MONTH_NAMES[d.getMonth()]; sortKey = d.getMonth(); break
       }
       case 'anio': {
-        key = String(d.getFullYear()); sortKey = d.getFullYear(); break
+        dateKey = String(d.getFullYear()); sortKey = d.getFullYear(); break
       }
       default: return null
     }
 
-    if (!groups.has(key)) groups.set(key, { sortKey, rows: [] })
-    groups.get(key)!.rows.push(row)
+    // Compound key includes all categorical values so grouping is preserved
+    const catParts = catCols.map(c => String(row[c] ?? ''))
+    const compoundKey = [dateKey, ...catParts].join('\x00')
+
+    if (!groups.has(compoundKey)) {
+      const catValues: Record<string, any> = {}
+      for (const c of catCols) catValues[c] = row[c]
+      groups.set(compoundKey, { sortKey, rows: [], catValues })
+    }
+    groups.get(compoundKey)!.rows.push(row)
   }
 
   const sorted = Array.from(groups.entries()).sort((a, b) => a[1].sortKey - b[1].sortKey)
 
-  const result = sorted.map(([key, { rows }]) => {
-    const agg: Record<string, any> = { [dateCol]: key }
+  const result = sorted.map(([key, { rows, catValues }]) => {
+    const dateKey = key.split('\x00')[0]
+    const agg: Record<string, any> = { [dateCol]: dateKey, ...catValues }
     for (const col of numCols) {
       agg[col] = rows.reduce((sum, r) => sum + (Number(r[col]) || 0), 0)
-    }
-    for (const col of otherCols) {
-      agg[col] = rows[0]?.[col]
     }
     return agg
   })
