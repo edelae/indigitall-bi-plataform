@@ -965,16 +965,16 @@ export default function DashboardBuilder() {
 
                         {/* Settings dropdown */}
                         {settingsOpen === w.grid_i && (
-                          <div className="no-drag absolute top-7 right-0 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-30 p-2 min-w-[220px] max-h-[420px] overflow-y-auto"
+                          <div className="no-drag absolute top-7 right-0 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-30 p-2 min-w-[260px] max-h-[520px] overflow-y-auto"
                             onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
 
-                            {/* SIZE PRESETS (Prompt 2) — all widget types */}
-                            <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamaño</p>
-                            <div className="flex flex-wrap gap-1 mb-1.5">
+                            {/* SIZE PRESETS — all widget types */}
+                            <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamaño (ancho x alto)</p>
+                            <div className="grid grid-cols-5 gap-1 mb-1.5">
                               {SIZE_PRESETS.map(sz => (
                                 <button key={sz.label}
                                   onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'grid_w', sz.w); updateWidgetField(w.grid_i, 'grid_h', sz.h) }}
-                                  className={`px-2 py-0.5 rounded text-[10px] transition-colors ${w.grid_w === sz.w && w.grid_h === sz.h ? 'bg-primary text-white' : 'bg-[#F3F4F6] hover:bg-gray-200'}`}>
+                                  className={`px-1 py-0.5 rounded text-[9px] text-center transition-colors ${w.grid_w === sz.w && w.grid_h === sz.h ? 'bg-primary text-white' : 'bg-[#F3F4F6] hover:bg-gray-200'}`}>
                                   {sz.label}
                                 </button>
                               ))}

@@ -137,14 +137,33 @@ export const FONT_FAMILIES = [
   { value: 'JetBrains Mono', label: 'Monospace' },
 ]
 
-// Widget size presets (Prompt 2)
+// Widget size presets — width x height
 export const SIZE_PRESETS = [
-  { label: 'XS', w: 2, h: 2 },
-  { label: 'S', w: 3, h: 2 },
-  { label: 'M', w: 4, h: 3 },
-  { label: 'L', w: 6, h: 4 },
-  { label: 'XL', w: 8, h: 4 },
-  { label: 'Full', w: 12, h: 4 },
+  // Small
+  { label: '2x1', w: 2, h: 1 },
+  { label: '2x2', w: 2, h: 2 },
+  { label: '3x2', w: 3, h: 2 },
+  { label: '3x3', w: 3, h: 3 },
+  // Medium
+  { label: '4x2', w: 4, h: 2 },
+  { label: '4x3', w: 4, h: 3 },
+  { label: '4x4', w: 4, h: 4 },
+  // Large
+  { label: '6x2', w: 6, h: 2 },
+  { label: '6x3', w: 6, h: 3 },
+  { label: '6x4', w: 6, h: 4 },
+  { label: '6x5', w: 6, h: 5 },
+  { label: '6x6', w: 6, h: 6 },
+  // XL
+  { label: '8x3', w: 8, h: 3 },
+  { label: '8x4', w: 8, h: 4 },
+  { label: '8x5', w: 8, h: 5 },
+  // Full width
+  { label: '12x2', w: 12, h: 2 },
+  { label: '12x3', w: 12, h: 3 },
+  { label: '12x4', w: 12, h: 4 },
+  { label: '12x5', w: 12, h: 5 },
+  { label: '12x6', w: 12, h: 6 },
 ]
 
 export interface TableInfo {
