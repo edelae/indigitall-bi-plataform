@@ -669,6 +669,14 @@ NPS: SELECT ns.nps_categoria AS "Categoria", COUNT(*) AS "Encuestas", ROUND(AVG(
                 conn.execute(text(f"SET statement_timeout = {SQL_TIMEOUT_MS}"))
                 df = pd.read_sql(text(sql), conn)
 
+            # 7. Post-process: clean intent labels (remove [1.2.3] prefixes)
+            intent_pattern = re.compile(r"^\[\d+[\d.]*\]\s*")
+            for col in df.columns:
+                if df[col].dtype == "object" and len(df) > 0:
+                    sample = df[col].dropna().head(5)
+                    if sample.apply(lambda v: bool(intent_pattern.match(str(v)))).sum() >= 2:
+                        df[col] = df[col].apply(lambda v: intent_pattern.sub("", str(v)) if pd.notna(v) else v)
+
             resolved_chart = chart_type or self._auto_detect_chart_type(df)
             return {
                 "type": "sql",
