@@ -228,22 +228,30 @@ class DataService:
     # --- Fallback rate ---
 
     def get_fallback_rate(self, tenant_filter: Optional[str] = None) -> Dict[str, Any]:
-        t = Message.__table__
-        w = self._tenant_filter(t, tenant_filter)
-        stmt = select(
-            func.count().label("total"),
-            func.count().filter(t.c.is_fallback == True).label("fallback_count"),  # noqa: E712
-        ).where(w)
-
+        """Fallback rate at CONVERSATION level: % of bot conversations that had fallback."""
+        sql = text("""
+            WITH conv_flags AS (
+                SELECT conversation_id,
+                       BOOL_OR(is_fallback) AS had_fallback,
+                       BOOL_OR(is_bot)      AS had_bot
+                FROM messages
+                WHERE conversation_id IS NOT NULL
+                  AND (:tenant IS NULL OR tenant_id = :tenant)
+                GROUP BY conversation_id
+            )
+            SELECT COUNT(*) FILTER (WHERE had_bot)                    AS bot_conversations,
+                   COUNT(*) FILTER (WHERE had_bot AND had_fallback)   AS fallback_conversations
+            FROM conv_flags
+        """)
         with engine.connect() as conn:
-            row = conn.execute(stmt).first()
+            row = conn.execute(sql, {"tenant": tenant_filter}).first()
 
-        total = row.total or 0
-        fb = row.fallback_count or 0
+        bot_total = row.bot_conversations or 0
+        fb = row.fallback_conversations or 0
         return {
             "fallback_count": fb,
-            "total": total,
-            "rate": round(fb / total * 100, 2) if total > 0 else 0,
+            "total": bot_total,
+            "rate": round(fb / bot_total * 100, 2) if bot_total > 0 else 0,
         }
 
     # --- High-message customers ---
@@ -343,18 +351,32 @@ class DataService:
                 func.count().label("total_messages"),
                 func.count(func.distinct(t.c.contact_id)).label("unique_contacts"),
                 func.count(func.distinct(t.c.conversation_id)).label("conversations"),
-                func.sum(case((t.c.is_fallback == True, 1), else_=0)).label("fallback_count"),  # noqa: E712
                 func.avg(t.c.wait_time_seconds).label("avg_wait_seconds"),
             ).where(f)
         ).first()
-        total = row.total_messages or 0
-        fb = row.fallback_count or 0
+        # Fallback rate at conversation level
+        fb_row = conn.execute(text("""
+            WITH conv_flags AS (
+                SELECT conversation_id,
+                       BOOL_OR(is_fallback) AS had_fallback,
+                       BOOL_OR(is_bot)      AS had_bot
+                FROM messages
+                WHERE conversation_id IS NOT NULL
+                  AND date >= :start AND date <= :end
+                GROUP BY conversation_id
+            )
+            SELECT COUNT(*) FILTER (WHERE had_bot)                  AS bot_convs,
+                   COUNT(*) FILTER (WHERE had_bot AND had_fallback) AS fb_convs
+            FROM conv_flags
+        """), {"start": start, "end": end}).first()
+        bot_convs = fb_row.bot_convs or 0
+        fb_convs = fb_row.fb_convs or 0
         return {
-            "total_messages": total,
+            "total_messages": row.total_messages or 0,
             "unique_contacts": row.unique_contacts or 0,
             "conversations": row.conversations or 0,
             "avg_wait_seconds": round(float(row.avg_wait_seconds or 0), 1),
-            "fallback_rate": round(fb / total * 100, 2) if total > 0 else 0,
+            "fallback_rate": round(fb_convs / bot_convs * 100, 2) if bot_convs > 0 else 0,
         }
 
     def _period_kpis_daily(self, conn, tenant_filter, start, end):
@@ -551,25 +573,35 @@ class DataService:
         start_date: Optional[date_type] = None,
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
-        """Message breakdown by actor type (Bot / Agente / Usuario / Sistema)."""
-        t = Message.__table__
-        w = self._tenant_filter(t, tenant_filter)
-        if start_date and end_date:
-            w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
-        category = case(
-            (t.c.is_bot == True, "Bot"),  # noqa: E712
-            (t.c.is_human == True, "Agente"),  # noqa: E712
-            (t.c.direction == "Inbound", "Usuario"),
-            (t.c.direction == "System", "Sistema"),
-            else_="Otro",
-        )
-        stmt = (
-            select(category.label("category"), func.count().label("count"))
-            .where(w)
-            .group_by(category)
-            .order_by(func.count().desc())
-        )
-        return self._exec(stmt)
+        """Conversation classification: Bot-only / Humano-only / Mixta."""
+        sql = text("""
+            WITH conv_flags AS (
+                SELECT conversation_id,
+                       BOOL_OR(is_bot)   AS has_bot,
+                       BOOL_OR(is_human) AS has_human
+                FROM messages
+                WHERE conversation_id IS NOT NULL
+                  AND (:tenant IS NULL OR tenant_id = :tenant)
+                  AND (:start IS NULL OR date >= :start)
+                  AND (:end   IS NULL OR date <= :end)
+                GROUP BY conversation_id
+            )
+            SELECT category, COUNT(*) AS count FROM (
+                SELECT CASE
+                    WHEN has_bot AND NOT has_human THEN 'Bot'
+                    WHEN NOT has_bot AND has_human THEN 'Agente'
+                    WHEN has_bot AND has_human     THEN 'Mixta'
+                    ELSE 'Otro'
+                END AS category
+                FROM conv_flags
+            ) sub
+            GROUP BY category
+            ORDER BY count DESC
+        """)
+        with engine.connect() as conn:
+            return pd.read_sql(sql, conn, params={
+                "tenant": tenant_filter, "start": start_date, "end": end_date,
+            })
 
     def get_top_intents_filtered(
         self,
@@ -609,24 +641,34 @@ class DataService:
         start_date: Optional[date_type] = None,
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
-        """Daily fallback rate trend."""
-        t = Message.__table__
-        w = self._tenant_filter(t, tenant_filter)
-        if start_date and end_date:
-            w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
-        stmt = (
-            select(
-                t.c.date,
-                func.count().label("total"),
-                func.sum(case((t.c.is_fallback == True, 1), else_=0)).label("fallback_count"),  # noqa: E712
+        """Daily fallback rate at CONVERSATION level."""
+        sql = text("""
+            WITH conv_flags AS (
+                SELECT conversation_id,
+                       MIN(date)            AS date,
+                       BOOL_OR(is_fallback) AS had_fallback,
+                       BOOL_OR(is_bot)      AS had_bot
+                FROM messages
+                WHERE conversation_id IS NOT NULL
+                  AND (:tenant IS NULL OR tenant_id = :tenant)
+                  AND (:start IS NULL OR date >= :start)
+                  AND (:end   IS NULL OR date <= :end)
+                GROUP BY conversation_id
             )
-            .where(w)
-            .group_by(t.c.date)
-            .order_by(t.c.date)
-        )
-        df = self._exec(stmt)
+            SELECT date,
+                   COUNT(*) FILTER (WHERE had_bot)                  AS total,
+                   COUNT(*) FILTER (WHERE had_bot AND had_fallback) AS fallback_count
+            FROM conv_flags
+            GROUP BY date
+            ORDER BY date
+        """)
+        with engine.connect() as conn:
+            df = pd.read_sql(sql, conn, params={
+                "tenant": tenant_filter, "start": start_date, "end": end_date,
+            })
         if not df.empty:
             df["fallback_rate"] = (df["fallback_count"] / df["total"] * 100).round(2)
+            df["fallback_rate"] = df["fallback_rate"].fillna(0)
         return df
 
     def get_bot_resolution_summary(
@@ -635,23 +677,35 @@ class DataService:
         start_date: Optional[date_type] = None,
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
-        """Bot vs human message breakdown for the period."""
-        t = Message.__table__
-        w = self._tenant_filter(t, tenant_filter)
-        if start_date and end_date:
-            w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
-        category = case(
-            (t.c.is_bot == True, "Bot"),  # noqa: E712
-            (t.c.is_human == True, "Agente"),  # noqa: E712
-            else_="Otro",
-        )
-        stmt = (
-            select(category.label("category"), func.count().label("count"))
-            .where(w)
-            .group_by(category)
-            .order_by(func.count().desc())
-        )
-        return self._exec(stmt)
+        """Conversation resolution: Bot-only vs Escalada vs Humano-only."""
+        sql = text("""
+            WITH conv_flags AS (
+                SELECT conversation_id,
+                       BOOL_OR(is_bot)   AS has_bot,
+                       BOOL_OR(is_human) AS has_human
+                FROM messages
+                WHERE conversation_id IS NOT NULL
+                  AND (:tenant IS NULL OR tenant_id = :tenant)
+                  AND (:start IS NULL OR date >= :start)
+                  AND (:end   IS NULL OR date <= :end)
+                GROUP BY conversation_id
+            )
+            SELECT category, COUNT(*) AS count FROM (
+                SELECT CASE
+                    WHEN has_bot AND NOT has_human THEN 'Bot'
+                    WHEN has_bot AND has_human     THEN 'Escalada'
+                    WHEN NOT has_bot AND has_human THEN 'Agente'
+                    ELSE 'Otro'
+                END AS category
+                FROM conv_flags
+            ) sub
+            GROUP BY category
+            ORDER BY count DESC
+        """)
+        with engine.connect() as conn:
+            return pd.read_sql(sql, conn, params={
+                "tenant": tenant_filter, "start": start_date, "end": end_date,
+            })
 
     def get_content_type_breakdown(
         self,
@@ -844,35 +898,57 @@ class DataService:
         start_date: Optional[date_type] = None,
         end_date: Optional[date_type] = None,
     ) -> Dict[str, Any]:
-        """KPIs for WhatsApp/Bot tab: messages, contacts, fallback, wait, delivery, bot resolution."""
+        """KPIs for WhatsApp/Bot tab — conversation-level bot resolution and fallback."""
         t = Message.__table__
         w = self._tenant_filter(t, tenant_filter)
         if start_date and end_date:
             w = and_(w, t.c.date >= start_date, t.c.date <= end_date)
 
         with engine.connect() as conn:
+            # Message-level counts (total messages, contacts, delivery)
             row = conn.execute(
                 select(
                     func.count().label("total_messages"),
                     func.count(func.distinct(t.c.contact_id)).label("unique_contacts"),
-                    func.sum(case((t.c.is_fallback == True, 1), else_=0)).label("fallback_count"),  # noqa: E712
                     func.avg(t.c.wait_time_seconds).label("avg_wait"),
                     func.sum(case((t.c.status.in_(["channel_delivered", "channel_read"]), 1), else_=0)).label("delivered"),
-                    func.sum(case((t.c.is_bot == True, 1), else_=0)).label("bot_msgs"),  # noqa: E712
                 ).where(w)
             ).first()
 
+            # Conversation-level: bot resolution and fallback
+            conv_row = conn.execute(text("""
+                WITH conv_flags AS (
+                    SELECT conversation_id,
+                           BOOL_OR(is_bot)      AS has_bot,
+                           BOOL_OR(is_human)     AS has_human,
+                           BOOL_OR(is_fallback)  AS had_fallback
+                    FROM messages
+                    WHERE conversation_id IS NOT NULL
+                      AND (:tenant IS NULL OR tenant_id = :tenant)
+                      AND (:start IS NULL OR date >= :start)
+                      AND (:end   IS NULL OR date <= :end)
+                    GROUP BY conversation_id
+                )
+                SELECT COUNT(*)                                              AS total_convs,
+                       COUNT(*) FILTER (WHERE has_bot AND NOT has_human)     AS bot_resolved,
+                       COUNT(*) FILTER (WHERE has_bot)                       AS bot_convs,
+                       COUNT(*) FILTER (WHERE has_bot AND had_fallback)      AS fallback_convs
+                FROM conv_flags
+            """), {"tenant": tenant_filter, "start": start_date, "end": end_date}).first()
+
         total = row.total_messages or 0
-        fb = row.fallback_count or 0
         delivered = row.delivered or 0
-        bot = row.bot_msgs or 0
+        total_convs = conv_row.total_convs or 0
+        bot_resolved = conv_row.bot_resolved or 0
+        bot_convs = conv_row.bot_convs or 0
+        fb_convs = conv_row.fallback_convs or 0
         return {
             "total_messages": total,
             "unique_contacts": row.unique_contacts or 0,
-            "fallback_rate": round(fb / total * 100, 2) if total > 0 else 0,
+            "fallback_rate": round(fb_convs / bot_convs * 100, 2) if bot_convs > 0 else 0,
             "avg_wait_seconds": round(float(row.avg_wait or 0), 1),
             "delivery_rate": round(delivered / total * 100, 2) if total > 0 else 0,
-            "bot_resolution_pct": round(bot / total * 100, 2) if total > 0 else 0,
+            "bot_resolution_pct": round(bot_resolved / total_convs * 100, 2) if total_convs > 0 else 0,
         }
 
     def get_message_status_distribution(
@@ -963,7 +1039,7 @@ Canal unico: WhatsApp Cloud API. Combina chatbot Dialogflow + agentes humanos + 
 
 === TABLAS DISPONIBLES ===
 
-TABLA: messages (principal — 122K+ filas)
+TABLA: messages (principal — 131K+ filas)
 Columnas: message_id, timestamp, date, hour, day_of_week, send_type, direction, content_type, status, contact_name, contact_id, tenant_id, conversation_id, agent_id, close_reason, intent, is_fallback, message_body, is_bot, is_human, wait_time_seconds, handle_time_seconds
 - direction: Inbound (usuario), Bot (dialogflow), Agent (humano), Outbound, System
 - send_type: input, operator, dialogflow, agent_notification, note
@@ -979,7 +1055,7 @@ Columnas: agent_id, tenant_id, total_messages, conversations_handled, avg_handle
 TABLA: daily_stats (85+ filas)
 Columnas: tenant_id, date, total_messages, unique_contacts, conversations, fallback_count
 
-TABLA: chat_conversations (38K+ filas — sesiones de agente)
+TABLA: chat_conversations (60K+ filas — sesiones de agente)
 Columnas: session_id, conversation_session_id, contact_id, agent_id, agent_email, channel, queued_at, assigned_at, closed_at, initial_session_id, wait_time_seconds, handle_time_seconds, tenant_id
 
 TABLA: chat_channels (canales de comunicacion)
@@ -987,6 +1063,15 @@ Columnas: channel_id, channel_type, channel_name, phone_number, status, config, 
 
 TABLA: chat_topics (categorias de conversacion)
 Columnas: topic_id, topic_name, description, is_active, tenant_id
+
+TABLA: nps_surveys (928+ filas — encuestas NPS de satisfaccion)
+Columnas: message_date, date, hour, day_of_week, month_label, contact_name, contact_id, entity, score_atencion, score_asesor, rapida, resuelto, volveria, nps_categoria, comentario, agent_id, conversation_id, close_reason, canal_tipo, tenant_id
+- score_atencion: calificacion de la atencion (1-5)
+- score_asesor: calificacion del asesor (1-5)
+- rapida/resuelto/volveria: respuestas binarias (1=si, 0=no)
+- nps_categoria: Promotor, Pasivo, Detractor
+- entity: nombre de la cooperativa/entidad
+- canal_tipo: tipo de canal (ej: WhatsApp)
 
 TABLA: campaigns (campanas de push/comunicacion)
 Columnas: campana_id, campana_nombre, canal, proyecto_cuenta, tipo_campana, total_enviados, total_entregados, total_clicks, fecha_inicio, fecha_fin, ctr, tasa_entrega, tenant_id

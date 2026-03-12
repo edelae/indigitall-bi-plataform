@@ -309,9 +309,16 @@ async def sms_kpis(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ):
-    svc = SmsDataService()
-    s, e = parse_dates(start_date, end_date)
-    return sanitize(svc.get_sms_kpis(s, e))
+    try:
+        svc = SmsDataService()
+        s, e = parse_dates(start_date, end_date)
+        return sanitize(svc.get_sms_kpis(s, e))
+    except Exception as exc:
+        logger.warning("SMS kpis endpoint failed: %s", exc)
+        return sanitize({
+            "total_enviados": 0, "total_chunks": 0, "total_delivered": 0,
+            "total_clicks": 0, "campanas": 0, "tipos_envio": 0,
+        })
 
 
 @router.get("/sms/trend")
@@ -319,9 +326,13 @@ async def sms_trend(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ):
-    svc = SmsDataService()
-    s, e = parse_dates(start_date, end_date)
-    return df_to_response(svc.get_sends_vs_chunks_trend(s, e))
+    try:
+        svc = SmsDataService()
+        s, e = parse_dates(start_date, end_date)
+        return df_to_response(svc.get_sends_vs_chunks_trend(s, e))
+    except Exception as exc:
+        logger.warning("SMS trend endpoint failed: %s", exc)
+        return {"columns": [], "data": []}
 
 
 @router.get("/sms/clicks-ctr")
@@ -329,9 +340,13 @@ async def sms_clicks_ctr(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ):
-    svc = SmsDataService()
-    s, e = parse_dates(start_date, end_date)
-    return df_to_response(svc.get_sends_clicks_ctr_trend(s, e))
+    try:
+        svc = SmsDataService()
+        s, e = parse_dates(start_date, end_date)
+        return df_to_response(svc.get_sends_clicks_ctr_trend(s, e))
+    except Exception as exc:
+        logger.warning("SMS clicks-ctr endpoint failed: %s", exc)
+        return {"columns": [], "data": []}
 
 
 @router.get("/sms/campaigns")
@@ -340,9 +355,13 @@ async def sms_campaigns(
     end_date: Optional[str] = None,
     limit: int = 10,
 ):
-    svc = SmsDataService()
-    s, e = parse_dates(start_date, end_date)
-    return df_to_response(svc.get_campaign_ranking(s, e, limit))
+    try:
+        svc = SmsDataService()
+        s, e = parse_dates(start_date, end_date)
+        return df_to_response(svc.get_campaign_ranking(s, e, limit))
+    except Exception as exc:
+        logger.warning("SMS campaigns endpoint failed: %s", exc)
+        return {"columns": [], "data": []}
 
 
 @router.get("/sms/campaigns-ctr")
@@ -351,9 +370,13 @@ async def sms_campaigns_ctr(
     end_date: Optional[str] = None,
     limit: int = 10,
 ):
-    svc = SmsDataService()
-    s, e = parse_dates(start_date, end_date)
-    return df_to_response(svc.get_campaign_ranking_by_ctr(s, e, limit))
+    try:
+        svc = SmsDataService()
+        s, e = parse_dates(start_date, end_date)
+        return df_to_response(svc.get_campaign_ranking_by_ctr(s, e, limit))
+    except Exception as exc:
+        logger.warning("SMS campaigns-ctr endpoint failed: %s", exc)
+        return {"columns": [], "data": []}
 
 
 @router.get("/sms/heatmap")
@@ -361,9 +384,13 @@ async def sms_heatmap(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ):
-    svc = SmsDataService()
-    s, e = parse_dates(start_date, end_date)
-    return df_to_response(svc.get_heatmap_data(s, e))
+    try:
+        svc = SmsDataService()
+        s, e = parse_dates(start_date, end_date)
+        return df_to_response(svc.get_heatmap_data(s, e))
+    except Exception as exc:
+        logger.warning("SMS heatmap endpoint failed: %s", exc)
+        return {"columns": [], "data": []}
 
 
 @router.get("/sms/types")
@@ -371,9 +398,13 @@ async def sms_types(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ):
-    svc = SmsDataService()
-    s, e = parse_dates(start_date, end_date)
-    return df_to_response(svc.get_sending_type_breakdown(s, e))
+    try:
+        svc = SmsDataService()
+        s, e = parse_dates(start_date, end_date)
+        return df_to_response(svc.get_sending_type_breakdown(s, e))
+    except Exception as exc:
+        logger.warning("SMS types endpoint failed: %s", exc)
+        return {"columns": [], "data": []}
 
 
 # ─── Toques / Control ────────────────────────────────────────────

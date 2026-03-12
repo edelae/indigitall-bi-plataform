@@ -305,22 +305,38 @@ export default function QueryChat() {
                 {/* KPI Card */}
                 {isKpi && lastResult.data.length > 0 && (
                   <div className="card p-6 mb-4">
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {lastResult.data.slice(0, 6).map((row, i) => {
-                        const keys = lastResult.columns
-                        const label = String(row[keys[0]] || '')
-                        const value = row[keys[1]] ?? row[keys[0]]
-                        return (
+                    {lastResult.data.length === 1 && lastResult.columns.length >= 1 ? (
+                      /* Single row: show each column as a KPI */
+                      <div className={`grid gap-4 ${lastResult.columns.length <= 2 ? 'grid-cols-1 max-w-md mx-auto' : 'grid-cols-2 md:grid-cols-3'}`}>
+                        {lastResult.columns.map((col, i) => (
                           <KpiCard
                             key={i}
-                            label={label}
-                            value={value}
+                            label={col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                            value={lastResult.data[0][col]}
                             icon={BarChart3}
                             color={PRIMARY_COLOR}
                           />
-                        )
-                      })}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      /* Multiple rows: first col = label, second col = value */
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {lastResult.data.slice(0, 9).map((row, i) => {
+                          const keys = lastResult.columns
+                          const label = String(row[keys[0]] || '')
+                          const value = row[keys[1]] ?? row[keys[0]]
+                          return (
+                            <KpiCard
+                              key={i}
+                              label={label}
+                              value={value}
+                              icon={BarChart3}
+                              color={PRIMARY_COLOR}
+                            />
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -339,6 +355,9 @@ export default function QueryChat() {
                       fontFamily={chartConfig.fontFamily}
                       axisFontSize={chartConfig.axisFontSize}
                       legendFontSize={chartConfig.legendFontSize}
+                      xColumn={chartConfig.xColumn}
+                      yColumns={chartConfig.yColumns}
+                      groupByColumn={chartConfig.groupByColumn}
                     />
                   </div>
                 )}
@@ -476,6 +495,7 @@ export default function QueryChat() {
           config={chartConfig}
           onChange={handleConfigChange}
           onClose={() => setShowCustomizer(false)}
+          availableColumns={lastResult?.columns}
         />
       )}
     </div>

@@ -8,15 +8,35 @@ sms_daily_stats columns: id, tenant_id, application_id, date,
   total_sent, total_delivered, total_rejected, total_chunks,
   total_clicks, unique_contacts, total_cost
   NOTE: This table has actual chunk/delivery/click data from /v2/sms/stats/application.
+
+NOTE: These tables may not exist in the database. All methods handle
+missing tables gracefully by returning empty results.
 """
 
+import logging
 import pandas as pd
 from datetime import date as date_type
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, text, inspect as sa_inspect
 from typing import Optional, Dict, Any, Tuple
 
 from app.models.database import engine
 from app.models.schemas import SmsEnvio, SmsDailyStat
+
+logger = logging.getLogger(__name__)
+
+_EMPTY_KPIS = {
+    "total_enviados": 0, "total_chunks": 0, "total_delivered": 0,
+    "total_clicks": 0, "campanas": 0, "tipos_envio": 0,
+}
+
+
+def _table_exists(table_name: str) -> bool:
+    """Check whether a table exists in the public schema."""
+    try:
+        insp = sa_inspect(engine)
+        return table_name in insp.get_table_names(schema="public")
+    except Exception:
+        return False
 
 
 class SmsDataService:
@@ -26,7 +46,8 @@ class SmsDataService:
         try:
             with engine.connect() as conn:
                 return pd.read_sql(stmt, conn)
-        except Exception:
+        except Exception as exc:
+            logger.warning("SMS query failed: %s", exc)
             return pd.DataFrame()
 
     def _base_where(self, t, start_date, end_date):
@@ -47,42 +68,46 @@ class SmsDataService:
         end_date: Optional[date_type] = None,
     ) -> Dict[str, Any]:
         """KPIs combining sms_envios (campaigns) + sms_daily_stats (chunks, delivery, clicks)."""
-        empty = {
-            "total_enviados": 0, "total_chunks": 0, "total_delivered": 0,
-            "total_clicks": 0, "campanas": 0, "tipos_envio": 0,
-        }
         try:
-            # Campaigns and sending types from sms_envios
-            t = SmsEnvio.__table__
-            w = self._base_where(t, start_date, end_date)
-            stmt1 = select(
-                func.count().label("total_enviados"),
-                func.count(func.distinct(t.c.campaign_id)).label("campanas"),
-                func.count(func.distinct(t.c.sending_type)).label("tipos_envio"),
-            ).where(w)
+            envios_result = {"total_enviados": 0, "campanas": 0, "tipos_envio": 0}
+            daily_result = {"total_chunks": 0, "total_delivered": 0, "total_clicks": 0}
 
-            # Chunks, delivered, clicks from sms_daily_stats
-            d = SmsDailyStat.__table__
-            dw = self._daily_where(d, start_date, end_date)
-            stmt2 = select(
-                func.coalesce(func.sum(d.c.total_chunks), 0).label("total_chunks"),
-                func.coalesce(func.sum(d.c.total_delivered), 0).label("total_delivered"),
-                func.coalesce(func.sum(d.c.total_clicks), 0).label("total_clicks"),
-            ).where(dw)
+            if _table_exists("sms_envios"):
+                t = SmsEnvio.__table__
+                w = self._base_where(t, start_date, end_date)
+                stmt1 = select(
+                    func.count().label("total_enviados"),
+                    func.count(func.distinct(t.c.campaign_id)).label("campanas"),
+                    func.count(func.distinct(t.c.sending_type)).label("tipos_envio"),
+                ).where(w)
+                with engine.connect() as conn:
+                    r1 = conn.execute(stmt1).first()
+                envios_result = {
+                    "total_enviados": r1.total_enviados or 0,
+                    "campanas": r1.campanas or 0,
+                    "tipos_envio": r1.tipos_envio or 0,
+                }
 
-            with engine.connect() as conn:
-                r1 = conn.execute(stmt1).first()
-                r2 = conn.execute(stmt2).first()
-            return {
-                "total_enviados": r1.total_enviados or 0,
-                "total_chunks": r2.total_chunks or 0,
-                "total_delivered": r2.total_delivered or 0,
-                "total_clicks": r2.total_clicks or 0,
-                "campanas": r1.campanas or 0,
-                "tipos_envio": r1.tipos_envio or 0,
-            }
-        except Exception:
-            return empty
+            if _table_exists("sms_daily_stats"):
+                d = SmsDailyStat.__table__
+                dw = self._daily_where(d, start_date, end_date)
+                stmt2 = select(
+                    func.coalesce(func.sum(d.c.total_chunks), 0).label("total_chunks"),
+                    func.coalesce(func.sum(d.c.total_delivered), 0).label("total_delivered"),
+                    func.coalesce(func.sum(d.c.total_clicks), 0).label("total_clicks"),
+                ).where(dw)
+                with engine.connect() as conn:
+                    r2 = conn.execute(stmt2).first()
+                daily_result = {
+                    "total_chunks": r2.total_chunks or 0,
+                    "total_delivered": r2.total_delivered or 0,
+                    "total_clicks": r2.total_clicks or 0,
+                }
+
+            return {**envios_result, **daily_result}
+        except Exception as exc:
+            logger.warning("get_sms_kpis failed: %s", exc)
+            return dict(_EMPTY_KPIS)
 
     def get_sends_vs_chunks_trend(
         self,
@@ -90,6 +115,8 @@ class SmsDataService:
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
         """Daily sends vs chunks from sms_daily_stats (has real chunk data)."""
+        if not _table_exists("sms_daily_stats"):
+            return pd.DataFrame()
         d = SmsDailyStat.__table__
         dw = self._daily_where(d, start_date, end_date)
         stmt = (
@@ -110,6 +137,8 @@ class SmsDataService:
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
         """Daily sends, clicks and CTR from sms_daily_stats."""
+        if not _table_exists("sms_daily_stats"):
+            return pd.DataFrame()
         d = SmsDailyStat.__table__
         dw = self._daily_where(d, start_date, end_date)
         stmt = (
@@ -134,6 +163,8 @@ class SmsDataService:
         limit: int = 10,
     ) -> pd.DataFrame:
         """Top campaigns by volume (campaign_id only, name not available)."""
+        if not _table_exists("sms_envios"):
+            return pd.DataFrame()
         t = SmsEnvio.__table__
         w = self._base_where(t, start_date, end_date)
         stmt = (
@@ -159,6 +190,8 @@ class SmsDataService:
         limit: int = 10,
     ) -> pd.DataFrame:
         """Top campaigns by volume (CTR not available, sorted by chunks/send)."""
+        if not _table_exists("sms_envios"):
+            return pd.DataFrame()
         t = SmsEnvio.__table__
         w = self._base_where(t, start_date, end_date)
         stmt = (
@@ -187,6 +220,8 @@ class SmsDataService:
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
         """Hour x Day-of-week heatmap."""
+        if not _table_exists("sms_envios"):
+            return pd.DataFrame()
         t = SmsEnvio.__table__
         w = and_(self._base_where(t, start_date, end_date), t.c.sent_at.isnot(None))
         dow = func.to_char(t.c.sent_at, "Day").label("day_name")
@@ -215,6 +250,8 @@ class SmsDataService:
         end_date: Optional[date_type] = None,
     ) -> pd.DataFrame:
         """SMS counts by sending type."""
+        if not _table_exists("sms_envios"):
+            return pd.DataFrame()
         t = SmsEnvio.__table__
         w = and_(self._base_where(t, start_date, end_date), t.c.sending_type.isnot(None))
         stmt = (
@@ -233,6 +270,8 @@ class SmsDataService:
         page_size: int = 20,
     ) -> Tuple[pd.DataFrame, int]:
         """Paginated SMS detail table with total count."""
+        if not _table_exists("sms_envios"):
+            return pd.DataFrame(), 0
         try:
             t = SmsEnvio.__table__
             w = self._base_where(t, start_date, end_date)
@@ -262,6 +301,8 @@ class SmsDataService:
         granularity: str = "month",
     ) -> pd.DataFrame:
         """Aggregated SMS counts for drill-down (month/week/day) from sms_daily_stats."""
+        if not _table_exists("sms_daily_stats"):
+            return pd.DataFrame()
         d = SmsDailyStat.__table__
         dw = self._daily_where(d, start_date, end_date)
 

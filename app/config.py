@@ -46,7 +46,11 @@ class Settings(BaseSettings):
 
     @property
     def has_openai_key(self) -> bool:
-        return bool(self.OPENAI_API_KEY) and self.OPENAI_API_KEY.startswith("sk-")
+        key = self.OPENAI_API_KEY
+        if not key or key in ("sk-your-key-here", ""):
+            return False
+        # Accept standard keys (sk-...) and project keys (sk-proj-...)
+        return key.startswith("sk-") or len(key) > 20
 
 
 settings = Settings()

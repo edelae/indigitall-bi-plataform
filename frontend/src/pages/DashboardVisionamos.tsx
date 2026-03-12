@@ -4,14 +4,14 @@ import {
   MessageSquare, Bot, Headphones, Send, Shield,
   RefreshCw, Download, Calendar, Loader2,
   Users, Clock, PhoneCall, BarChart3, Zap, AlertTriangle,
-  TrendingUp, Hash, Target, ExternalLink,
+  TrendingUp, Hash, Target, ExternalLink, Pencil,
 } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
 import ChartWidget from '../components/ChartWidget'
 import DashboardAnalyst from '../components/DashboardAnalyst'
-import { fetchAnalytics, saveQuery } from '../api/client'
+import { fetchAnalytics, saveQuery, saveDashboard } from '../api/client'
 import { exportCsv } from '../utils/csvExport'
-import type { ChartType } from '../types'
+import type { ChartType, DashboardWidget } from '../types'
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -247,6 +247,94 @@ export default function DashboardVisionamos() {
 
   const currentState = { whatsapp: wa, bot, cc, sms, toques }[activeTab]
 
+  // ─── Clone as editable dashboard ─────────────────────────────
+
+  async function handleEditDashboard() {
+    const allWidgets: DashboardWidget[] = []
+    const tabDataMap: Record<TabKey, { data: any; tab: string }> = {
+      whatsapp: { data: wa.data, tab: 'WhatsApp General' },
+      bot: { data: bot.data, tab: 'Bot' },
+      cc: { data: cc.data, tab: 'Contact Center' },
+      sms: { data: sms.data, tab: 'SMS' },
+      toques: { data: toques.data, tab: 'Control de Toques' },
+    }
+
+    const widgetDefs: { tabKey: TabKey; widgets: { title: string; dataKey: string; chartType: ChartType; w: number; h: number }[] }[] = [
+      { tabKey: 'whatsapp', widgets: [
+        { title: 'Mensajes por Hora', dataKey: 'byHour', chartType: 'bar', w: 7, h: 4 },
+        { title: 'Distribucion Bot / Humano', dataKey: 'botHuman', chartType: 'pie', w: 5, h: 4 },
+        { title: 'Tendencia Diaria de Mensajes', dataKey: 'trend', chartType: 'area', w: 12, h: 4 },
+        { title: 'Heatmap Mensajes por Hora y Dia', dataKey: 'heatmap', chartType: 'heatmap', w: 12, h: 4 },
+      ]},
+      { tabKey: 'bot', widgets: [
+        { title: 'Tendencia Tasa Fallback', dataKey: 'fallback', chartType: 'line', w: 6, h: 4 },
+        { title: 'Top Intenciones', dataKey: 'intents', chartType: 'bar_horizontal', w: 6, h: 4 },
+        { title: 'Distribucion Bot / Humano', dataKey: 'botHuman', chartType: 'pie', w: 6, h: 4 },
+        { title: 'Tipos de Contenido', dataKey: 'content', chartType: 'bar_horizontal', w: 6, h: 4 },
+      ]},
+      { tabKey: 'cc', widgets: [
+        { title: 'Rendimiento de Agentes', dataKey: 'agents', chartType: 'table', w: 12, h: 4 },
+        { title: 'Razones de Cierre', dataKey: 'reasons', chartType: 'pie', w: 6, h: 4 },
+        { title: 'Conversaciones en el Tiempo', dataKey: 'trend', chartType: 'area', w: 6, h: 4 },
+        { title: 'Tendencia FRT', dataKey: 'frt', chartType: 'line', w: 6, h: 4 },
+        { title: 'Tendencia Handle Time', dataKey: 'handle', chartType: 'line', w: 6, h: 4 },
+        { title: 'Tipo Conversacion (Bot/Humano/Mixta)', dataKey: 'convTypeTrend', chartType: 'area_stacked', w: 6, h: 4 },
+        { title: 'Tendencia Dead Time', dataKey: 'deadTime', chartType: 'line', w: 6, h: 4 },
+      ]},
+      { tabKey: 'sms', widgets: [
+        { title: 'Enviados vs Chunks', dataKey: 'trend', chartType: 'line', w: 6, h: 4 },
+        { title: 'Tipo de Envio', dataKey: 'types', chartType: 'pie', w: 6, h: 4 },
+        { title: 'Top Campanas por Volumen', dataKey: 'campaigns', chartType: 'bar_horizontal', w: 6, h: 4 },
+        { title: 'Top Campanas por Chunks/Envio', dataKey: 'campaignsCtr', chartType: 'bar_horizontal', w: 6, h: 4 },
+      ]},
+      { tabKey: 'toques', widgets: [
+        { title: 'Distribucion de Toques', dataKey: 'dist', chartType: 'bar', w: 6, h: 4 },
+        { title: 'Tendencia Semanal % Sobre-tocados', dataKey: 'weeklyTrend', chartType: 'line', w: 6, h: 4 },
+        { title: 'Contactos Sobre-tocados', dataKey: 'overTouched', chartType: 'table', w: 12, h: 4 },
+      ]},
+    ]
+
+    for (const tabDef of widgetDefs) {
+      const tabInfo = tabDataMap[tabDef.tabKey]
+      if (!tabInfo.data) continue
+      let y = 0
+      for (const wDef of tabDef.widgets) {
+        const df = tabInfo.data[wDef.dataKey]
+        if (!df?.data?.length && !df?.columns?.length) continue
+        const x = wDef.w < 12 ? (allWidgets.filter(w => w.tab_id === tabDef.tabKey).length % 2) * 6 : 0
+        allWidgets.push({
+          grid_i: `${tabDef.tabKey}-${wDef.dataKey}`,
+          grid_x: x,
+          grid_y: y,
+          grid_w: wDef.w,
+          grid_h: wDef.h,
+          title: wDef.title,
+          type: wDef.chartType,
+          chart_type: wDef.chartType,
+          width: wDef.w,
+          data: df?.data || [],
+          columns: df?.columns || [],
+          sql: WIDGET_SQL[wDef.title] || undefined,
+          query_text: wDef.title,
+          tab_id: tabDef.tabKey,
+          tab_name: tabInfo.tab,
+        })
+        if (wDef.w >= 12 || allWidgets.filter(w => w.tab_id === tabDef.tabKey).length % 2 === 0) y += wDef.h
+      }
+    }
+
+    try {
+      const result = await saveDashboard({
+        name: 'Dashboard Visionamos (Editable)',
+        description: 'Copia editable del dashboard Visionamos — WhatsApp + Contact Center + SMS',
+        layout: allWidgets,
+      })
+      navigate(`/tableros/nuevo?edit=${result.id}`)
+    } catch (e: any) {
+      alert('Error al crear dashboard editable: ' + (e.message || 'Error desconocido'))
+    }
+  }
+
   // ─── Render helpers ──────────────────────────────────────────
 
   function renderLoading() {
@@ -271,13 +359,13 @@ export default function DashboardVisionamos() {
   const WIDGET_SQL: Record<string, string> = {
     // WhatsApp
     'Mensajes por Hora': `SELECT hour, COUNT(*) AS count\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY hour\nORDER BY hour`,
-    'Distribucion Bot / Humano': `SELECT\n  CASE\n    WHEN is_bot = TRUE THEN 'Bot'\n    WHEN is_human = TRUE THEN 'Agente'\n    WHEN direction = 'Inbound' THEN 'Usuario'\n    ELSE 'Otro'\n  END AS category,\n  COUNT(*) AS count\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY category\nORDER BY count DESC`,
+    'Distribucion Bot / Humano': `WITH conv_flags AS (\n  SELECT conversation_id,\n    CASE\n      WHEN BOOL_OR(is_bot) AND BOOL_OR(is_human) THEN 'Mixta'\n      WHEN BOOL_OR(is_human) THEN 'Agente'\n      WHEN BOOL_OR(is_bot) THEN 'Bot'\n      ELSE 'Otro'\n    END AS category\n  FROM messages\n  WHERE tenant_id = 'visionamos'\n    AND conversation_id IS NOT NULL\n    AND date >= '${startDate}' AND date <= '${endDate}'\n  GROUP BY conversation_id\n)\nSELECT category, COUNT(*) AS count\nFROM conv_flags\nGROUP BY category\nORDER BY count DESC`,
     'Tendencia Diaria de Mensajes': `SELECT date, COUNT(*) AS count\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY date\nORDER BY date`,
     'Heatmap Mensajes por Hora y Dia': `SELECT day_of_week AS dia_semana, hour AS hora, COUNT(*) AS value\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY day_of_week, hour\nORDER BY hour`,
     // Bot
-    'Tendencia Tasa Fallback Bot': `SELECT date,\n  COUNT(*) AS total,\n  SUM(CASE WHEN is_fallback = TRUE THEN 1 ELSE 0 END) AS fallback_count,\n  ROUND(SUM(CASE WHEN is_fallback THEN 1 ELSE 0 END)::numeric / COUNT(*) * 100, 1) AS fallback_rate\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY date\nORDER BY date`,
+    'Tendencia Tasa Fallback Bot': `WITH conv_flags AS (\n  SELECT conversation_id, MIN(date) AS date,\n    BOOL_OR(is_fallback) AS had_fallback,\n    BOOL_OR(is_bot) AS had_bot\n  FROM messages\n  WHERE tenant_id = 'visionamos'\n    AND conversation_id IS NOT NULL\n    AND date >= '${startDate}' AND date <= '${endDate}'\n  GROUP BY conversation_id\n)\nSELECT date,\n  COUNT(*) FILTER (WHERE had_bot) AS bot_convs,\n  COUNT(*) FILTER (WHERE had_bot AND had_fallback) AS fallback_convs,\n  ROUND(COUNT(*) FILTER (WHERE had_bot AND had_fallback)::numeric\n    / NULLIF(COUNT(*) FILTER (WHERE had_bot), 0) * 100, 1) AS fallback_rate\nFROM conv_flags\nGROUP BY date\nORDER BY date`,
     'Top Intenciones del Bot': `SELECT intent, COUNT(*) AS count\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND intent IS NOT NULL AND intent != ''\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY intent\nORDER BY count DESC\nLIMIT 10`,
-    'Distribucion Bot vs Humano': `SELECT\n  CASE\n    WHEN is_bot = TRUE THEN 'Bot'\n    WHEN is_human = TRUE THEN 'Agente'\n    WHEN direction = 'Inbound' THEN 'Usuario'\n    ELSE 'Otro'\n  END AS category,\n  COUNT(*) AS count\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY category\nORDER BY count DESC`,
+    'Distribucion Bot vs Humano': `WITH conv_flags AS (\n  SELECT conversation_id,\n    CASE\n      WHEN BOOL_OR(is_bot) AND BOOL_OR(is_human) THEN 'Mixta'\n      WHEN BOOL_OR(is_human) THEN 'Agente'\n      WHEN BOOL_OR(is_bot) THEN 'Bot'\n      ELSE 'Otro'\n    END AS category\n  FROM messages\n  WHERE tenant_id = 'visionamos'\n    AND conversation_id IS NOT NULL\n    AND date >= '${startDate}' AND date <= '${endDate}'\n  GROUP BY conversation_id\n)\nSELECT category, COUNT(*) AS count\nFROM conv_flags\nGROUP BY category\nORDER BY count DESC`,
     'Tipos de Contenido de Mensajes': `SELECT content_type, COUNT(*) AS count\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND content_type IS NOT NULL AND content_type != ''\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY content_type\nORDER BY count DESC\nLIMIT 10`,
     'Heatmap Bot Mensajes por Hora y Dia': `SELECT day_of_week AS dia_semana, hour AS hora, COUNT(*) AS value\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND date >= '${startDate}' AND date <= '${endDate}'\nGROUP BY day_of_week, hour\nORDER BY hour`,
     // Contact Center
@@ -620,6 +708,15 @@ export default function DashboardVisionamos() {
                   className="input text-xs !w-auto !px-2 !py-1"
                 />
               </div>
+              <button
+                onClick={handleEditDashboard}
+                className="flex items-center gap-1 text-xs px-3 py-1.5 font-medium rounded-btn transition-colors"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-card)' }}
+                title="Clonar y editar en el constructor de dashboards"
+              >
+                <Pencil size={12} />
+                Editar
+              </button>
               <button
                 onClick={() => setRefreshKey(k => k + 1)}
                 className="btn-primary flex items-center gap-1 text-xs px-3 py-1.5"

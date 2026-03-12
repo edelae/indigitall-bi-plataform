@@ -15,6 +15,7 @@ ALLOWED_TABLES = {
     "toques_daily", "campaigns", "toques_heatmap", "toques_usuario",
     "saved_queries", "dashboards", "sync_state",
     "chat_conversations", "chat_channels", "chat_topics",
+    "nps_surveys", "sms_envios", "sms_daily_stats", "sms_campaigns", "sms_contacts",
 }
 
 # Analytics schema tables in public_marts (dbt marts)

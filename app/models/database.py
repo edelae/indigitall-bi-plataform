@@ -37,6 +37,8 @@ def create_tables():
         Message, Contact, Agent, DailyStat,
         ChatConversation, ChatChannel, ChatTopic,
         ToquesDaily, Campaign, ToquesHeatmap, ToquesUsuario,
+        SmsEnvio, SmsDailyStat, SmsCampaign, SmsContact,
+        NpsSurvey,
         SavedQuery, Dashboard, SyncState,
     )
     Base.metadata.create_all(bind=engine)

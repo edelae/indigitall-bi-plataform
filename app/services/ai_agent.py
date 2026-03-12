@@ -39,6 +39,7 @@ ALLOWED_TABLES = frozenset({
     "messages", "contacts", "agents", "daily_stats",
     "toques_daily", "campaigns", "toques_heatmap", "toques_usuario",
     "chat_conversations", "chat_channels", "chat_topics",
+    "nps_surveys", "sms_envios", "sms_daily_stats",
     # dbt marts (public_marts schema)
     "dim_campaigns", "dim_contacts",
     "fct_agent_performance", "fct_daily_stats",
@@ -249,7 +250,7 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 
 === REGLAS PARA SQL ===
 - Solo SELECT (no INSERT, UPDATE, DELETE, DROP, etc.)
-- Tablas core (esquema public): messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap
+- Tablas core (esquema public): messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
 - Tablas dbt marts (esquema public_marts): public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
 - SIEMPRE usar prefijo public_marts. para tablas de marts
 - SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}'
@@ -296,7 +297,7 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 - En SQL: SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}' y LIMIT
 
 === REGLAS SQL ===
-- Solo SELECT. Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap
+- Solo SELECT. Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
 - Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
 - Alias legibles en espanol (AS "Fecha", AS "Total Mensajes")
 """
@@ -539,11 +540,8 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
                 "Verifica tu conexion a internet e intenta de nuevo."
             )
         except Exception as e:
-            logger.error("OpenAI query failed: %s", e)
-            return self._friendly_error(
-                f"Ocurrio un error con el servicio de IA: {str(e)[:150]}. "
-                "Por favor intenta de nuevo."
-            )
+            logger.error("OpenAI query failed, falling back to Claude: %s", e)
+            return None  # Fall through to Claude fallback
 
     def _handle_tool_calls(
         self,

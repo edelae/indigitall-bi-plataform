@@ -1,4 +1,4 @@
-import { X, Palette, Type, RulerIcon, BarChart3 } from 'lucide-react'
+import { X, Palette, Type, RulerIcon, BarChart3, Columns3 } from 'lucide-react'
 import type { ChartType } from '../types'
 import { COLOR_PALETTES, FONT_FAMILIES } from '../types'
 
@@ -11,6 +11,9 @@ export interface ChartConfig {
   fontFamily?: string
   axisFontSize?: number
   legendFontSize?: number
+  xColumn?: string
+  yColumns?: string[]
+  groupByColumn?: string
 }
 
 const CHART_OPTIONS: { value: ChartType; label: string }[] = [
@@ -27,18 +30,34 @@ const CHART_OPTIONS: { value: ChartType; label: string }[] = [
   { value: 'treemap', label: 'Treemap' },
   { value: 'heatmap', label: 'Heatmap' },
   { value: 'gauge', label: 'Gauge' },
+  { value: 'kpi', label: 'Tarjeta KPI' },
+  { value: 'table', label: 'Tabla' },
 ]
 
 interface Props {
   config: ChartConfig
   onChange: (config: ChartConfig) => void
   onClose: () => void
+  availableColumns?: string[]
 }
 
-export default function ChartCustomizer({ config, onChange, onClose }: Props) {
+export default function ChartCustomizer({ config, onChange, onClose, availableColumns = [] }: Props) {
   const update = <K extends keyof ChartConfig>(key: K, value: ChartConfig[K]) => {
     onChange({ ...config, [key]: value })
   }
+
+  const toggleYColumn = (col: string) => {
+    const current = config.yColumns || availableColumns.slice(1)
+    const next = current.includes(col)
+      ? current.filter(c => c !== col)
+      : [...current, col]
+    if (next.length > 0) update('yColumns', next)
+  }
+
+  const xCol = config.xColumn || availableColumns[0]
+  const groupCol = config.groupByColumn
+  const selectableForY = availableColumns.filter(c => c !== xCol && c !== groupCol)
+  const activeYCols = config.yColumns || availableColumns.slice(1)
 
   return (
     <div className="w-[280px] flex flex-col border-l border-border-light h-full overflow-y-auto"
@@ -54,6 +73,66 @@ export default function ChartCustomizer({ config, onChange, onClose }: Props) {
       </div>
 
       <div className="p-3 space-y-4">
+        {/* Column Assignment (Power BI-style) */}
+        {availableColumns.length >= 2 && (
+          <section>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Columns3 size={12} className="text-primary" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+                Asignacion de columnas
+              </p>
+            </div>
+
+            {/* X Axis */}
+            <label className="text-[10px] mb-0.5 block font-medium" style={{ color: 'var(--text-muted)' }}>Eje X</label>
+            <select className="input text-xs mb-2"
+              value={xCol}
+              onChange={e => {
+                const newX = e.target.value
+                const newY = (config.yColumns || availableColumns.slice(1)).filter(c => c !== newX)
+                onChange({ ...config, xColumn: newX, yColumns: newY.length ? newY : availableColumns.filter(c => c !== newX && c !== groupCol).slice(0, 1) })
+              }}>
+              {availableColumns.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ').replace(/\b\w/g, x => x.toUpperCase())}</option>)}
+            </select>
+
+            {/* Y Values */}
+            <label className="text-[10px] mb-0.5 block font-medium" style={{ color: 'var(--text-muted)' }}>Valores (Y)</label>
+            <div className="max-h-28 overflow-y-auto rounded-btn mb-2 p-1" style={{ border: '1px solid var(--border-light)' }}>
+              {selectableForY.map(col => (
+                <label key={col} className="flex items-center gap-1.5 py-0.5 px-1 text-[11px] cursor-pointer hover:bg-surface rounded"
+                  style={{ color: 'var(--text-primary)' }}>
+                  <input type="checkbox" className="rounded"
+                    checked={activeYCols.includes(col)}
+                    onChange={() => toggleYColumn(col)} />
+                  {col.replace(/_/g, ' ').replace(/\b\w/g, x => x.toUpperCase())}
+                </label>
+              ))}
+            </div>
+
+            {/* Legend / Group by */}
+            <label className="text-[10px] mb-0.5 block font-medium" style={{ color: 'var(--text-muted)' }}>Leyenda / Agrupar por</label>
+            <select className="input text-xs mb-1"
+              value={groupCol || ''}
+              onChange={e => {
+                const newGroup = e.target.value || undefined
+                const newY = newGroup
+                  ? availableColumns.filter(c => c !== xCol && c !== newGroup).slice(0, 1)
+                  : config.yColumns
+                onChange({ ...config, groupByColumn: newGroup, yColumns: newY })
+              }}>
+              <option value="">Ninguna</option>
+              {availableColumns.filter(c => c !== xCol).map(c => (
+                <option key={c} value={c}>{c.replace(/_/g, ' ').replace(/\b\w/g, x => x.toUpperCase())}</option>
+              ))}
+            </select>
+            {groupCol && (
+              <p className="text-[9px] mb-1" style={{ color: 'var(--text-light)' }}>
+                Cada valor unico de "{groupCol}" sera una serie en la leyenda
+              </p>
+            )}
+          </section>
+        )}
+
         {/* Chart type */}
         <section>
           <div className="flex items-center gap-1.5 mb-2">

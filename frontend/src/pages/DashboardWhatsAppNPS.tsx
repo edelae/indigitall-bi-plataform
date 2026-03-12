@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   MessageSquare, Bot, RefreshCw, Download, Calendar, Loader2,
   Users, AlertTriangle, TrendingUp, Target, ExternalLink,
-  ThumbsUp, ThumbsDown, Star, BarChart3, Minus,
+  ThumbsUp, ThumbsDown, Star, BarChart3, Minus, Pencil,
 } from 'lucide-react'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -11,9 +11,9 @@ import {
 } from 'recharts'
 import KpiCard from '../components/KpiCard'
 import ChartWidget from '../components/ChartWidget'
-import { fetchAnalytics, saveQuery } from '../api/client'
+import { fetchAnalytics, saveQuery, saveDashboard } from '../api/client'
 import { exportCsv } from '../utils/csvExport'
-import type { ChartType } from '../types'
+import type { ChartType, DashboardWidget } from '../types'
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -352,6 +352,66 @@ export default function DashboardWhatsAppNPS() {
 
   const currentState = activeTab === 'general' ? general : botTab
 
+  // ─── Clone as editable dashboard ─────────────────────────────
+
+  async function handleEditDashboard() {
+    const widgets: DashboardWidget[] = []
+    const tabDefs = [
+      { tabKey: 'general', tabName: 'WhatsApp General', data: general.data, items: [
+        { title: 'NPS vs Canal', dataKey: 'trend', chartType: 'combo' as ChartType, w: 12, h: 5 },
+        { title: 'Distribucion NPS', dataKey: 'distribution', chartType: 'pie' as ChartType, w: 5, h: 4 },
+        { title: 'NPS por Entidad', dataKey: 'byEntity', chartType: 'bar_horizontal' as ChartType, w: 7, h: 4 },
+        { title: 'Intent vs Canal', dataKey: 'intentCanal', chartType: 'bar_stacked' as ChartType, w: 12, h: 4 },
+      ]},
+      { tabKey: 'bot', tabName: 'WhatsApp BOT', data: botTab.data, items: [
+        { title: 'Tendencia Fallbacks', dataKey: 'fallbackTrend', chartType: 'combo' as ChartType, w: 12, h: 5 },
+        { title: 'Fallbacks por Intent', dataKey: 'fallbackIntent', chartType: 'bar_horizontal' as ChartType, w: 6, h: 4 },
+        { title: 'Top Intenciones Bot', dataKey: 'topIntents', chartType: 'bar_horizontal' as ChartType, w: 6, h: 4 },
+      ]},
+    ]
+
+    for (const tab of tabDefs) {
+      if (!tab.data) continue
+      let y = 0
+      let colIdx = 0
+      for (const item of tab.items) {
+        const df = tab.data[item.dataKey]
+        if (!df?.data?.length) continue
+        const x = item.w >= 12 ? 0 : (colIdx % 2) * 6
+        widgets.push({
+          grid_i: `${tab.tabKey}-${item.dataKey}`,
+          grid_x: x,
+          grid_y: y,
+          grid_w: item.w,
+          grid_h: item.h,
+          title: item.title,
+          type: item.chartType,
+          chart_type: item.chartType,
+          width: item.w,
+          data: df.data,
+          columns: df.columns,
+          sql: WIDGET_SQL[item.title] || undefined,
+          query_text: item.title,
+          tab_id: tab.tabKey,
+          tab_name: tab.tabName,
+        })
+        colIdx++
+        if (item.w >= 12 || colIdx % 2 === 0) y += item.h
+      }
+    }
+
+    try {
+      const result = await saveDashboard({
+        name: 'WhatsApp NPS & Bot (Editable)',
+        description: 'Copia editable del dashboard WhatsApp Analytics NPS & Bot',
+        layout: widgets,
+      })
+      navigate(`/tableros/nuevo?edit=${result.id}`)
+    } catch (e: any) {
+      alert('Error al crear dashboard editable: ' + (e.message || 'Error desconocido'))
+    }
+  }
+
   // ─── WIDGET_SQL ────────────────────────────────────────────
 
   const WIDGET_SQL: Record<string, string> = {
@@ -359,8 +419,8 @@ export default function DashboardWhatsAppNPS() {
     'NPS por Entidad': `SELECT\n  entity AS entidad,\n  COUNT(*) AS encuestas,\n  ROUND(AVG(score_atencion)::numeric, 2) AS avg_atencion,\n  ROUND(AVG(score_asesor)::numeric, 2) AS avg_asesor,\n  ROUND(\n    (SUM(CASE WHEN nps_categoria = 'Promotor' THEN 1 ELSE 0 END)\n     - SUM(CASE WHEN nps_categoria = 'Detractor' THEN 1 ELSE 0 END))::numeric\n    / NULLIF(COUNT(*), 0) * 100, 1\n  ) AS nps_score\nFROM nps_surveys\nWHERE entity IS NOT NULL AND entity != ''\nGROUP BY entity\nORDER BY encuestas DESC`,
     'Distribucion NPS': `SELECT nps_categoria AS categoria, COUNT(*) AS count\nFROM nps_surveys\nWHERE tenant_id = 'visionamos'\n  AND nps_categoria IS NOT NULL\nGROUP BY nps_categoria\nORDER BY count DESC`,
     'Intent vs Canal': `WITH conv_types AS (\n  SELECT conversation_id,\n    CASE\n      WHEN bool_or(is_bot) AND bool_or(is_human) THEN 'Mixta'\n      WHEN bool_or(is_human) THEN 'Agente'\n      WHEN bool_or(is_bot) THEN 'Bot'\n      ELSE 'Otro'\n    END AS canal_tipo\n  FROM messages\n  WHERE tenant_id = 'visionamos'\n  GROUP BY conversation_id\n)\nSELECT m.intent, ct.canal_tipo, COUNT(*) AS count\nFROM messages m\nLEFT JOIN conv_types ct ON m.conversation_id = ct.conversation_id\nWHERE m.intent IS NOT NULL AND m.intent != ''\n  AND m.tenant_id = 'visionamos'\nGROUP BY m.intent, ct.canal_tipo\nORDER BY m.intent`,
-    'Tendencia Fallbacks': `SELECT\n  TO_CHAR(date, 'YYYY-MM') AS periodo,\n  COUNT(*) AS total_mensajes,\n  SUM(CASE WHEN is_fallback THEN 1 ELSE 0 END) AS fallbacks,\n  ROUND(\n    SUM(CASE WHEN is_fallback THEN 1 ELSE 0 END)::numeric\n    / NULLIF(COUNT(*), 0) * 100, 1\n  ) AS fallback_rate\nFROM messages\nWHERE is_bot = TRUE AND tenant_id = 'visionamos'\nGROUP BY TO_CHAR(date, 'YYYY-MM')\nORDER BY periodo`,
-    'Fallbacks por Intent': `SELECT\n  COALESCE(intent, 'Sin Intent') AS intent,\n  COUNT(*) AS total,\n  SUM(CASE WHEN is_fallback THEN 1 ELSE 0 END) AS fallbacks,\n  ROUND(\n    SUM(CASE WHEN is_fallback THEN 1 ELSE 0 END)::numeric\n    / NULLIF(COUNT(*), 0) * 100, 1\n  ) AS fallback_rate\nFROM messages\nWHERE is_bot = TRUE AND tenant_id = 'visionamos'\nGROUP BY intent\nHAVING SUM(CASE WHEN is_fallback THEN 1 ELSE 0 END) > 0\nORDER BY fallbacks DESC\nLIMIT 15`,
+    'Tendencia Fallbacks': `WITH conv_flags AS (\n  SELECT conversation_id, MIN(date) AS date,\n    BOOL_OR(is_fallback) AS had_fallback,\n    BOOL_OR(is_bot) AS had_bot\n  FROM messages\n  WHERE tenant_id = 'visionamos'\n    AND conversation_id IS NOT NULL\n  GROUP BY conversation_id\n)\nSELECT TO_CHAR(date, 'YYYY-MM') AS periodo,\n  COUNT(*) FILTER (WHERE had_bot) AS total_bot_convs,\n  COUNT(*) FILTER (WHERE had_bot AND had_fallback) AS fallbacks,\n  ROUND(COUNT(*) FILTER (WHERE had_bot AND had_fallback)::numeric\n    / NULLIF(COUNT(*) FILTER (WHERE had_bot), 0) * 100, 1) AS fallback_rate\nFROM conv_flags\nGROUP BY TO_CHAR(date, 'YYYY-MM')\nORDER BY periodo`,
+    'Fallbacks por Intent': `WITH conv_intents AS (\n  SELECT conversation_id, intent,\n    BOOL_OR(is_fallback) AS had_fallback\n  FROM messages\n  WHERE is_bot = TRUE AND tenant_id = 'visionamos'\n    AND conversation_id IS NOT NULL\n  GROUP BY conversation_id, intent\n)\nSELECT COALESCE(intent, 'Sin Intent') AS intent,\n  COUNT(*) AS total,\n  SUM(CASE WHEN had_fallback THEN 1 ELSE 0 END) AS fallbacks,\n  ROUND(SUM(CASE WHEN had_fallback THEN 1 ELSE 0 END)::numeric\n    / NULLIF(COUNT(*), 0) * 100, 1) AS fallback_rate\nFROM conv_intents\nGROUP BY intent\nHAVING SUM(CASE WHEN had_fallback THEN 1 ELSE 0 END) > 0\nORDER BY fallbacks DESC\nLIMIT 15`,
     'Top Intenciones Bot': `SELECT intent, COUNT(*) AS count\nFROM messages\nWHERE tenant_id = 'visionamos'\n  AND intent IS NOT NULL AND intent != ''\nGROUP BY intent\nORDER BY count DESC\nLIMIT 10`,
   }
 
@@ -590,6 +650,15 @@ export default function DashboardWhatsAppNPS() {
                   className="input text-xs !w-auto !px-2 !py-1"
                 />
               </div>
+              <button
+                onClick={handleEditDashboard}
+                className="flex items-center gap-1 text-xs px-3 py-1.5 font-medium rounded-btn transition-colors"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-card)' }}
+                title="Clonar y editar en el constructor de dashboards"
+              >
+                <Pencil size={12} />
+                Editar
+              </button>
               <button
                 onClick={() => setRefreshKey(k => k + 1)}
                 className="btn-primary flex items-center gap-1 text-xs px-3 py-1.5"

@@ -332,6 +332,7 @@ class NpsDataService:
         self, tenant: Optional[str] = None,
         start: Optional[date_type] = None, end: Optional[date_type] = None,
     ) -> Dict[str, Any]:
+        """Bot KPIs — message counts + conversation-level fallback rate."""
         t = Message.__table__
         filters = [self._tenant_filter(t, tenant), t.c.is_bot == True]
         filters += self._date_filter(t, start, end)
@@ -342,20 +343,35 @@ class NpsDataService:
                     func.count().label("total_bot_messages"),
                     func.count(func.distinct(t.c.contact_id)).label("unique_contacts"),
                     func.count(func.distinct(t.c.intent)).label("unique_intents"),
-                    func.sum(case((t.c.is_fallback == True, 1), else_=0)).label("total_fallbacks"),
                 ).where(and_(*filters))
             ).first()
 
-        total = row.total_bot_messages or 0
-        fallbacks = row.total_fallbacks or 0
-        fallback_rate = round(fallbacks / total * 100, 1) if total > 0 else 0
+            # Conversation-level fallback rate
+            fb_row = conn.execute(text("""
+                WITH conv_flags AS (
+                    SELECT conversation_id,
+                           BOOL_OR(is_fallback) AS had_fallback,
+                           BOOL_OR(is_bot)      AS had_bot
+                    FROM messages
+                    WHERE conversation_id IS NOT NULL
+                      AND (:tenant IS NULL OR tenant_id = :tenant)
+                      AND (:start IS NULL OR date >= :start)
+                      AND (:end   IS NULL OR date <= :end)
+                    GROUP BY conversation_id
+                )
+                SELECT COUNT(*) FILTER (WHERE had_bot)                  AS bot_convs,
+                       COUNT(*) FILTER (WHERE had_bot AND had_fallback) AS fb_convs
+                FROM conv_flags
+            """), {"tenant": tenant, "start": start, "end": end}).first()
 
+        bot_convs = fb_row.bot_convs or 0
+        fb_convs = fb_row.fb_convs or 0
         return {
-            "total_bot_messages": total,
+            "total_bot_messages": row.total_bot_messages or 0,
             "unique_contacts": row.unique_contacts or 0,
             "unique_intents": row.unique_intents or 0,
-            "total_fallbacks": fallbacks,
-            "fallback_rate": fallback_rate,
+            "total_fallbacks": fb_convs,
+            "fallback_rate": round(fb_convs / bot_convs * 100, 1) if bot_convs > 0 else 0,
         }
 
     # ─── NPS Distribution ────────────────────────────────────────

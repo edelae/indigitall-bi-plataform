@@ -22,6 +22,9 @@ interface Props {
   fontFamily?: string
   axisFontSize?: number
   legendFontSize?: number
+  xColumn?: string
+  yColumns?: string[]
+  groupByColumn?: string
 }
 
 const LABELS: Record<string, string> = {
@@ -78,20 +81,53 @@ function getLabel(col: string): string {
   return col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-export default function ChartWidget({ data, columns, chartType, height = 300, colors, xLabel, yLabel, showLegend = true, onClickPoint, fillContainer, fontFamily, axisFontSize, legendFontSize }: Props) {
-  const xKey = columns[0]
-  const yKey = columns.length > 1 ? columns[1] : columns[0]
-  const yKeys = columns.slice(1)
+export default function ChartWidget({ data, columns, chartType, height = 300, colors, xLabel, yLabel, showLegend = true, onClickPoint, fillContainer, fontFamily, axisFontSize, legendFontSize, xColumn, yColumns, groupByColumn }: Props) {
   const palette = colors || CHART_COLORS
   const chartHeight: number | string = fillContainer ? '100%' : height
   const axisFs = axisFontSize || 12
   const legendFs = legendFontSize || 11
   const ff = fontFamily || 'Inter'
 
+  // Resolve effective columns (user-assigned or default)
+  const effectiveX = xColumn || columns[0]
+
+  // Pivot data when groupByColumn is set (Power BI-style legend)
+  const { pivotedData, effectiveYKeys } = useMemo(() => {
+    if (groupByColumn && columns.includes(groupByColumn)) {
+      const valueCol = (yColumns || columns.filter(c => c !== effectiveX && c !== groupByColumn))[0]
+      if (!valueCol) return { pivotedData: data, effectiveYKeys: columns.slice(1) }
+
+      const groups = [...new Set(data.map(r => String(r[groupByColumn])))].sort()
+      const grouped = new Map<string, Record<string, any>>()
+      for (const row of data) {
+        const xVal = String(row[effectiveX])
+        if (!grouped.has(xVal)) {
+          const entry: Record<string, any> = { [effectiveX]: row[effectiveX] }
+          for (const g of groups) entry[g] = 0
+          grouped.set(xVal, entry)
+        }
+        const entry = grouped.get(xVal)!
+        const gVal = String(row[groupByColumn])
+        const numVal = Number(row[valueCol])
+        entry[gVal] = isNaN(numVal) ? row[valueCol] : numVal
+      }
+      return { pivotedData: [...grouped.values()], effectiveYKeys: groups }
+    }
+
+    const yks = yColumns && yColumns.length > 0
+      ? yColumns.filter(c => columns.includes(c))
+      : columns.filter(c => c !== effectiveX)
+    return { pivotedData: data, effectiveYKeys: yks.length > 0 ? yks : columns.slice(1) }
+  }, [data, columns, effectiveX, yColumns, groupByColumn])
+
+  const xKey = effectiveX
+  const yKey = effectiveYKeys[0] || columns[columns.length > 1 ? 1 : 0]
+  const yKeys = effectiveYKeys
+
   const processedData = useMemo(() => {
-    return data.map(row => {
+    return pivotedData.map(row => {
       const newRow = { ...row }
-      for (const col of columns.slice(1)) {
+      for (const col of yKeys) {
         if (typeof newRow[col] === 'string') {
           const num = parseFloat(newRow[col].replace(/,/g, '').replace(/%/g, ''))
           if (!isNaN(num)) newRow[col] = num
@@ -99,7 +135,7 @@ export default function ChartWidget({ data, columns, chartType, height = 300, co
       }
       return newRow
     })
-  }, [data, columns])
+  }, [pivotedData, yKeys])
 
   const handleClick = (point: any) => {
     if (onClickPoint && point?.activePayload?.[0]) {
