@@ -338,11 +338,11 @@ export default function DashboardView() {
               Filtros
               {dashFilters.length > 0 && <span className="bg-primary text-white text-[9px] px-1.5 py-0.5 rounded-full ml-1">{dashFilters.length}</span>}
             </button>
-            {dashFilters.filter(f => f.selected.length > 0).map(f => (
+            {dashFilters.map(f => (
               <span key={f.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-medium rounded-lg">
-                {f.label}: {f.selected.length === 1 ? f.selected[0] : `${f.selected.length} valores`}
-                <button onClick={() => { setDashFilters(prev => prev.map(df => df.id === f.id ? { ...df, selected: [] } : df)) }}
-                  className="hover:bg-primary/20 rounded p-0.5"><X size={8} /></button>
+                {f.label}{f.selected.length > 0 ? `: ${f.selected.length === 1 ? f.selected[0] : `${f.selected.length} val.`}` : ''}
+                <button onClick={() => setDashFilters(prev => prev.filter(df => df.id !== f.id))}
+                  className="hover:bg-primary/20 rounded p-0.5" title="Quitar filtro"><X size={8} /></button>
               </span>
             ))}
             {filterLoading && <Loader2 size={12} className="animate-spin text-primary" />}
@@ -438,7 +438,6 @@ export default function DashboardView() {
             compactType="vertical"
             margin={GRID_MARGIN}
             containerPadding={GRID_PADDING}
-            measureBeforeMount
           >
             {widgets.map(w => {
               const cardSt = getCardStyle(w.card_style)

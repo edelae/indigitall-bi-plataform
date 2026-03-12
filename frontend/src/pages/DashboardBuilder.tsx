@@ -683,14 +683,14 @@ export default function DashboardBuilder() {
       )}
 
       {/* Active filter chips bar */}
-      {dashFilters.some(f => f.selected.length > 0) && !filterPanelOpen && (
+      {dashFilters.length > 0 && !filterPanelOpen && (
         <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
           <Filter size={12} className="text-[#9CA3AF]" />
-          {dashFilters.filter(f => f.selected.length > 0).map(f => (
+          {dashFilters.map(f => (
             <span key={f.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-medium rounded-lg">
-              {f.label}: {f.selected.length === 1 ? f.selected[0] : `${f.selected.length} valores`}
-              <button onClick={() => { setDashFilters(prev => prev.map(df => df.id === f.id ? { ...df, selected: [] } : df)); applyFilters() }}
-                className="hover:bg-primary/20 rounded p-0.5"><X size={8} /></button>
+              {f.label}{f.selected.length > 0 ? `: ${f.selected.length === 1 ? f.selected[0] : `${f.selected.length} val.`}` : ''}
+              <button onClick={() => setDashFilters(prev => prev.filter(df => df.id !== f.id))}
+                className="hover:bg-primary/20 rounded p-0.5" title="Quitar filtro"><X size={8} /></button>
             </span>
           ))}
           <button onClick={() => setFilterPanelOpen(true)} className="text-[10px] text-primary hover:underline">Editar</button>
@@ -890,7 +890,6 @@ export default function DashboardBuilder() {
               containerPadding={GRID_PADDING}
               onLayoutChange={handleLayoutChange}
               draggableCancel=".no-drag"
-              measureBeforeMount
               style={{ minHeight: 400 }}
             >
               {widgets.map(w => {

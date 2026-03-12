@@ -457,16 +457,57 @@ export const GRANULARITY_OPTIONS: { value: DashboardGranularity; label: string }
 export function transformSqlGranularity(sql: string, granularity: DashboardGranularity): string {
   if (granularity === 'original' || !sql) return sql
   const pattern = /DATE_TRUNC\s*\(\s*'(?:month|week|day)'\s*,\s*([\s\S]*?)\)(?:::date)?/gi
+
+  // Replace DATE_TRUNC and also fix ORDER BY to use numeric sort
+  let transformed = sql
   switch (granularity) {
     case 'dia_semana':
-      return sql.replace(pattern, "TRIM(TO_CHAR($1, 'Day'))")
+      // Use CASE for Spanish day names in weekday order (1=Lunes...7=Domingo)
+      transformed = transformed.replace(pattern,
+        "CASE EXTRACT(ISODOW FROM $1)::int " +
+        "WHEN 1 THEN 'Lunes' WHEN 2 THEN 'Martes' WHEN 3 THEN 'Miercoles' " +
+        "WHEN 4 THEN 'Jueves' WHEN 5 THEN 'Viernes' WHEN 6 THEN 'Sabado' " +
+        "WHEN 7 THEN 'Domingo' END")
+      // Replace ORDER BY to sort by ISODOW instead of alphabetical
+      transformed = transformed.replace(
+        /ORDER\s+BY\s+[\w."]+(?:\s+(?:ASC|DESC))?/i,
+        (match) => {
+          // Extract the first date column reference from the original to build sort
+          const firstDateMatch = sql.match(/DATE_TRUNC\s*\(\s*'(?:month|week|day)'\s*,\s*([\s\S]*?)\)(?:::date)?/i)
+          if (firstDateMatch) {
+            return `ORDER BY EXTRACT(ISODOW FROM ${firstDateMatch[1]})::int ASC`
+          }
+          return match
+        }
+      )
+      break
     case 'mes':
-      return sql.replace(pattern, "TRIM(TO_CHAR($1, 'Month'))")
+      // Use CASE for Spanish month names in calendar order
+      transformed = transformed.replace(pattern,
+        "CASE EXTRACT(MONTH FROM $1)::int " +
+        "WHEN 1 THEN 'Enero' WHEN 2 THEN 'Febrero' WHEN 3 THEN 'Marzo' " +
+        "WHEN 4 THEN 'Abril' WHEN 5 THEN 'Mayo' WHEN 6 THEN 'Junio' " +
+        "WHEN 7 THEN 'Julio' WHEN 8 THEN 'Agosto' WHEN 9 THEN 'Septiembre' " +
+        "WHEN 10 THEN 'Octubre' WHEN 11 THEN 'Noviembre' WHEN 12 THEN 'Diciembre' END")
+      transformed = transformed.replace(
+        /ORDER\s+BY\s+[\w."]+(?:\s+(?:ASC|DESC))?/i,
+        (match) => {
+          const firstDateMatch = sql.match(/DATE_TRUNC\s*\(\s*'(?:month|week|day)'\s*,\s*([\s\S]*?)\)(?:::date)?/i)
+          if (firstDateMatch) {
+            return `ORDER BY EXTRACT(MONTH FROM ${firstDateMatch[1]})::int ASC`
+          }
+          return match
+        }
+      )
+      break
     case 'anio':
-      return sql.replace(pattern, "EXTRACT(YEAR FROM $1)::text")
+      transformed = transformed.replace(pattern, "EXTRACT(YEAR FROM $1)::text")
+      // Year already sorts correctly as text (ascending by default)
+      break
     default:
       return sql
   }
+  return transformed
 }
 
 export function getCardStyle(preset?: string): React.CSSProperties {
