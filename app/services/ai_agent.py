@@ -70,7 +70,7 @@ OPENAI_TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The SQL SELECT query (or WITH ... SELECT CTE). Must include WHERE tenant_id = '{TENANT_ID}' and LIMIT.",
+                        "description": "The SQL SELECT query (or WITH ... SELECT CTE). Must include WHERE alias.tenant_id = '{TENANT_ID}' and LIMIT. ALWAYS use table aliases (m, cc, c, etc.) and qualify ALL columns with aliases in JOINs.",
                     },
                     "chart_type": {
                         "type": "string",
@@ -198,42 +198,55 @@ Para CLARIFICATION:
 - "kpi" — un solo numero/KPI
 - "combo" — barras + linea (dual eje)
 
-=== REGLAS SQL ===
+=== REGLAS SQL CRITICAS ===
 - Solo SELECT (o WITH ... SELECT)
-- Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
+- Tablas core: messages (m), contacts (c), agents (a), daily_stats (ds), chat_conversations (cc), campaigns (ca), toques_daily (td), toques_heatmap (th), nps_surveys (ns), sms_envios (se), sms_daily_stats (sd)
 - Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
 - SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}'
 - SIEMPRE incluir LIMIT (max 1000)
 - Alias legibles en espanol (AS "Fecha", AS "Total Mensajes")
+- **CRITICO**: Cuando uses JOIN, SIEMPRE usa alias de tabla (m, cc, c, etc.) y califica TODAS las columnas con el alias (m.tenant_id, cc.queued_at, m.date). NUNCA escribas tenant_id sin alias en JOINs — causa error "ambiguous column".
+- **CRITICO**: En JOINs, pon WHERE alias.tenant_id = '{{TENANT_ID}}' en la tabla principal (FROM).
+
+=== INTENCIONES (INTENTS) ===
+- La columna intent esta en la tabla messages. Cada mensaje puede tener un intent.
+- Para obtener el intent de una conversacion, usa el ULTIMO intent no-nulo de la conversacion:
+  WITH last_intent AS (
+    SELECT m.conversation_id,
+           (ARRAY_AGG(m.intent ORDER BY m.date DESC, m.id DESC) FILTER (WHERE m.intent IS NOT NULL AND m.intent != ''))[1] AS intent
+    FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id
+  )
+  SELECT li.intent AS "Intencion", COUNT(*) AS "Conversaciones" FROM last_intent li WHERE li.intent IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20
 
 === CONSULTAS COMUNES (SQL de referencia) ===
 
 Resumen general:
-SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages WHERE tenant_id = '{{TENANT_ID}}'
-UNION ALL SELECT 'Contactos', COUNT(DISTINCT contact_id)::text FROM messages WHERE tenant_id = '{{TENANT_ID}}'
-UNION ALL SELECT 'Conversaciones', COUNT(DISTINCT conversation_id)::text FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND conversation_id IS NOT NULL
+SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}'
+UNION ALL SELECT 'Contactos', COUNT(DISTINCT m.contact_id)::text FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}'
+UNION ALL SELECT 'Conversaciones', COUNT(DISTINCT m.conversation_id)::text FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL
 LIMIT 10
 
-Tasa de fallback:
-SELECT COUNT(*) FILTER (WHERE is_fallback) AS "Fallbacks", COUNT(*) AS "Total", ROUND(100.0 * COUNT(*) FILTER (WHERE is_fallback) / NULLIF(COUNT(*), 0), 1) AS "Tasa %" FROM messages WHERE tenant_id = '{{TENANT_ID}}' LIMIT 1
-
-Mensajes por hora:
-SELECT hour AS "Hora", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 24
-
 Tendencia diaria:
-SELECT date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
+SELECT m.date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
 
 Top contactos:
-SELECT contact_name AS "Contacto", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND contact_name IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
-
-Distribucion de intenciones:
-SELECT intent AS "Intencion", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND intent IS NOT NULL AND intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+SELECT m.contact_name AS "Contacto", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.contact_name IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 
 Rendimiento de agentes:
-SELECT agent_id AS "Agente", COUNT(*) AS "Mensajes", COUNT(DISTINCT conversation_id) AS "Conversaciones" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+SELECT m.agent_id AS "Agente", COUNT(*) AS "Mensajes", COUNT(DISTINCT m.conversation_id) AS "Conversaciones" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
-Mensajes por dia de semana:
-SELECT day_of_week AS "Dia", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY CASE day_of_week WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 WHEN 'Saturday' THEN 6 WHEN 'Sunday' THEN 7 END LIMIT 7
+Conversaciones por fecha clasificadas por tipo (Bot/Agente/Mixta):
+WITH conv_flags AS (
+  SELECT m.conversation_id, MIN(m.date) AS fecha,
+         BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human
+  FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id
+)
+SELECT cf.fecha AS "Fecha",
+       CASE WHEN cf.has_bot AND NOT cf.has_human THEN 'Bot'
+            WHEN cf.has_human AND NOT cf.has_bot THEN 'Agente'
+            ELSE 'Mixta' END AS "Tipo",
+       COUNT(*) AS "Conversaciones"
+FROM conv_flags cf GROUP BY 1, 2 ORDER BY 1 LIMIT 500
 """
 
     def _get_system_prompt_openai(self) -> str:
@@ -257,19 +270,23 @@ SELECT day_of_week AS "Dia", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_i
 3. nps_surveys (928): score_atencion, score_asesor, nps_categoria, canal_tipo, entity
 4. CRITICO: messages.date (DATE) vs chat_conversations.queued_at (TIMESTAMP). NUNCA "date" en chat_conversations.
 
-=== REGLAS SQL ===
+=== REGLAS SQL CRITICAS ===
 - Solo SELECT (o WITH ... SELECT)
-- Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
-- Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, etc.
-- SIEMPRE WHERE tenant_id = '{{TENANT_ID}}' y LIMIT
+- Tablas: messages (m), contacts (c), agents (a), daily_stats (ds), chat_conversations (cc), campaigns (ca), toques_daily (td), toques_heatmap (th), nps_surveys (ns), sms_envios (se), sms_daily_stats (sd)
+- Marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, etc.
+- SIEMPRE WHERE alias.tenant_id = '{{TENANT_ID}}' y LIMIT
+- **CRITICO**: En JOINs SIEMPRE usar alias y calificar TODAS las columnas (m.tenant_id, cc.queued_at). NUNCA tenant_id sin alias — causa error "ambiguous column".
 - Alias legibles en espanol
 
+=== INTENCIONES ===
+- intent esta en messages. Para intent de conversacion, usar el ULTIMO intent no-nulo:
+  WITH last_intent AS (SELECT m.conversation_id, (ARRAY_AGG(m.intent ORDER BY m.date DESC, m.id DESC) FILTER (WHERE m.intent IS NOT NULL AND m.intent != ''))[1] AS intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
+
 === CONSULTAS DE REFERENCIA ===
-Resumen: SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages WHERE tenant_id = '{{TENANT_ID}}' UNION ALL SELECT 'Contactos', COUNT(DISTINCT contact_id)::text FROM messages WHERE tenant_id = '{{TENANT_ID}}' LIMIT 10
-Fallback: SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE is_fallback) / NULLIF(COUNT(*), 0), 1) AS "Tasa Fallback %" FROM messages WHERE tenant_id = '{{TENANT_ID}}' LIMIT 1
-Tendencia: SELECT date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
-Top contactos: SELECT contact_name AS "Contacto", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND contact_name IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
-Agentes: SELECT agent_id AS "Agente", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+Resumen: SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' UNION ALL SELECT 'Contactos', COUNT(DISTINCT m.contact_id)::text FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' LIMIT 10
+Tendencia: SELECT m.date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
+Agentes: SELECT m.agent_id AS "Agente", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+Conv. por tipo: WITH cf AS (SELECT m.conversation_id, MIN(m.date) AS fecha, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id) SELECT cf.fecha AS "Fecha", CASE WHEN cf.has_bot AND NOT cf.has_human THEN 'Bot' WHEN cf.has_human AND NOT cf.has_bot THEN 'Agente' ELSE 'Mixta' END AS "Tipo", COUNT(*) AS "Conversaciones" FROM cf GROUP BY 1, 2 ORDER BY 1 LIMIT 500
 """
 
     # ------------------------------------------------------------------
@@ -497,10 +514,27 @@ Agentes: SELECT agent_id AS "Agente", COUNT(*) AS "Mensajes" FROM messages WHERE
         tenant = tenant_filter or settings.DEFAULT_TENANT
         sql = sql.replace("{TENANT_ID}", tenant)
         if "tenant_id" not in sql.lower():
+            # Find the first FROM table (with optional alias) to qualify tenant_id
+            first_table_match = re.search(r"(?i)FROM\s+([a-zA-Z_][a-zA-Z0-9_.]*)\s+(?:AS\s+)?([a-zA-Z_]\w*)?", sql)
+            alias = first_table_match.group(2) if first_table_match and first_table_match.group(2) else None
+            tid_col = f"{alias}.tenant_id" if alias else "tenant_id"
             if " WHERE " in sql.upper():
-                sql = re.sub(r"(?i)\bWHERE\b", f"WHERE tenant_id = '{tenant}' AND", sql, count=1)
+                sql = re.sub(r"(?i)\bWHERE\b", f"WHERE {tid_col} = '{tenant}' AND", sql, count=1)
             else:
-                sql = re.sub(r"(?i)(FROM\s+[a-zA-Z_][a-zA-Z0-9_.]*)", rf"\1 WHERE tenant_id = '{tenant}'", sql, count=1)
+                insert_after = first_table_match.end() if first_table_match else None
+                if insert_after and alias:
+                    sql = sql[:insert_after] + f" WHERE {tid_col} = '{tenant}'" + sql[insert_after:]
+                else:
+                    sql = re.sub(r"(?i)(FROM\s+[a-zA-Z_][a-zA-Z0-9_.]*)", rf"\1 WHERE tenant_id = '{tenant}'", sql, count=1)
+
+        # 4b. Fix ambiguous tenant_id in JOINs — qualify bare tenant_id with first FROM alias
+        has_join = bool(re.search(r"\bJOIN\b", sql, re.IGNORECASE))
+        if has_join:
+            first_table_match = re.search(r"(?i)FROM\s+([a-zA-Z_][a-zA-Z0-9_.]*)\s+(?:AS\s+)?([a-zA-Z_]\w*)", sql)
+            if first_table_match and first_table_match.group(2):
+                alias = first_table_match.group(2)
+                # Replace bare tenant_id references (not already qualified with alias.)
+                sql = re.sub(r"(?<![a-zA-Z0-9_.])\btenant_id\b", f"{alias}.tenant_id", sql)
 
         # 5. Enforce LIMIT
         if "LIMIT" not in sql.upper():
