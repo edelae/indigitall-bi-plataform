@@ -1,18 +1,21 @@
-import { useEffect, useState, Component, type ReactNode } from 'react'
+import { useEffect, useState, useRef, useMemo, Component, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle } from 'lucide-react'
+import { Responsive } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import DashboardAnalyst from '../components/DashboardAnalyst'
 import type { Dashboard, DashboardWidget, ChartType } from '../types'
 import { PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 import { getDashboard } from '../api/client'
+import 'react-grid-layout/css/styles.css'
 
-// Grid constants
-const GRID_COLS = 12
+// Grid constants — IDENTICAL to DashboardBuilder
+const GRID_COLS = { lg: 12, md: 10, sm: 6, xs: 4 }
+const GRID_BREAKPOINTS = { lg: 1200, md: 996, sm: 768, xs: 480 }
 const GRID_ROW_HEIGHT = 80
-const GRID_GAP = 12
-const GRID_PAD = 12
+const GRID_MARGIN: [number, number] = [8, 8]
+const GRID_PADDING: [number, number] = [8, 8]
 
 const TEXT_SIZE_CLASS: Record<string, string> = {
   xs: 'text-xs', sm: 'text-sm', base: 'text-base',
@@ -60,6 +63,22 @@ export default function DashboardView() {
   const [infoModal, setInfoModal] = useState<DashboardWidget | null>(null)
   const [tabs, setTabs] = useState<DashboardTab[]>([])
   const [activeTabId, setActiveTabId] = useState('')
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const [canvasWidth, setCanvasWidth] = useState(0)
+
+  // Measure canvas container width for react-grid-layout
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setCanvasWidth(entry.contentRect.width)
+      }
+    })
+    ro.observe(el)
+    setCanvasWidth(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -108,6 +127,36 @@ export default function DashboardView() {
       .finally(() => setLoading(false))
   }, [id])
 
+  // Collect real KPI / widget data for DashboardAnalyst context
+  const analystKpis = useMemo(() => {
+    const kpis: Record<string, string | number> = {}
+    const allWidgets = tabs.flatMap(t => t.widgets)
+    for (const w of allWidgets) {
+      const label = w.custom_title || w.title
+      if (w.type === 'kpi' && w.kpi_value !== undefined) {
+        kpis[label] = w.kpi_value
+      } else if (w.data && w.data.length > 0 && w.columns && w.columns.length >= 1) {
+        // Summarize chart data: total rows + first column values
+        if (w.data.length === 1) {
+          // Single-row result: include all column values
+          for (const col of w.columns) {
+            kpis[`${label} — ${col}`] = w.data[0][col]
+          }
+        } else {
+          kpis[`${label} (filas)`] = w.data.length
+          // Include top 5 values for the main Y column
+          if (w.columns.length >= 2) {
+            const xCol = w.columns[0]
+            const yCol = w.columns[1]
+            const top5 = w.data.slice(0, 5).map(r => `${r[xCol]}: ${r[yCol]}`).join(', ')
+            kpis[`${label} — top datos`] = top5
+          }
+        }
+      }
+    }
+    return kpis
+  }, [tabs])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -130,8 +179,14 @@ export default function DashboardView() {
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0]
   const widgets = activeTab?.widgets || []
 
-  // Calculate total grid rows needed for this tab
-  const totalRows = widgets.reduce((max, w) => Math.max(max, (w.grid_y ?? 0) + (w.grid_h ?? 4)), 0)
+  // Build react-grid-layout compatible layout
+  const gridLayout = widgets.map(w => ({
+    i: w.grid_i,
+    x: w.grid_x ?? 0,
+    y: w.grid_y ?? 0,
+    w: w.grid_w ?? 6,
+    h: w.grid_h ?? 4,
+  }))
 
   const handleChartClick = (widget: DashboardWidget) => {
     if (widget.query_id) {
@@ -192,8 +247,9 @@ export default function DashboardView() {
         </div>
       )}
 
-      {/* Canvas — Pure CSS Grid (no react-grid-layout dependency) */}
+      {/* Canvas — react-grid-layout Responsive (read-only, matches builder) */}
       <div
+        ref={canvasRef}
         className={`bg-[#F8F9FB] min-h-[400px] ${tabs.length > 1 ? 'rounded-b-xl' : 'rounded-xl'} border border-[#E5E7EB] ${tabs.length > 1 ? 'border-t-0' : ''}`}
       >
         {widgets.length === 0 ? (
@@ -206,26 +262,22 @@ export default function DashboardView() {
               <Pencil size={14} /> Editar tablero
             </Link>
           </div>
-        ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
-              gridTemplateRows: `repeat(${totalRows}, ${GRID_ROW_HEIGHT}px)`,
-              gap: GRID_GAP,
-              padding: GRID_PAD,
-            }}
+        ) : canvasWidth > 0 ? (
+          <Responsive
+            width={canvasWidth}
+            layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout, xs: gridLayout }}
+            breakpoints={GRID_BREAKPOINTS}
+            cols={GRID_COLS}
+            rowHeight={GRID_ROW_HEIGHT}
+            isDraggable={false}
+            isResizable={false}
+            compactType="vertical"
+            margin={GRID_MARGIN}
+            containerPadding={GRID_PADDING}
+            style={{ minHeight: 400 }}
           >
             {widgets.map(w => (
-              <div
-                key={w.grid_i}
-                style={{
-                  gridColumn: `${(w.grid_x ?? 0) + 1} / span ${w.grid_w ?? 6}`,
-                  gridRow: `${(w.grid_y ?? 0) + 1} / span ${w.grid_h ?? 4}`,
-                  minHeight: 0,
-                  minWidth: 0,
-                }}
-              >
+              <div key={w.grid_i}>
                 <WidgetErrorBoundary widgetTitle={w.title}>
                   <div
                     className="bg-white h-full flex flex-col overflow-hidden border border-[#E8EAF0]"
@@ -365,15 +417,15 @@ export default function DashboardView() {
                 </WidgetErrorBoundary>
               </div>
             ))}
-          </div>
-        )}
+          </Responsive>
+        ) : null}
       </div>
 
-      {/* AI Analyst Panel */}
+      {/* AI Analyst Panel — with real dashboard data */}
       <DashboardAnalyst
         context={{
           activeTab: activeTabId,
-          kpis: {},
+          kpis: analystKpis,
         }}
       />
 
