@@ -17,6 +17,28 @@ const GRID_ROW_HEIGHT = 80
 const GRID_MARGIN: [number, number] = [8, 8]
 const GRID_PADDING: [number, number] = [8, 8]
 
+// Hook: measure container width via ResizeObserver (with rAF fallback)
+// Identical to DashboardBuilder's hook for consistent sizing
+function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) setWidth(entry.contentRect.width)
+    })
+    ro.observe(el)
+    setWidth(el.getBoundingClientRect().width)
+    // Fallback: re-measure after layout paint in case initial width was 0
+    requestAnimationFrame(() => {
+      const w = el.getBoundingClientRect().width
+      if (w > 0) setWidth(w)
+    })
+    return () => ro.disconnect()
+  }, [ref])
+  return width
+}
+
 const TEXT_SIZE_CLASS: Record<string, string> = {
   xs: 'text-xs', sm: 'text-sm', base: 'text-base',
   lg: 'text-lg', xl: 'text-xl', '2xl': 'text-2xl',
@@ -64,21 +86,7 @@ export default function DashboardView() {
   const [tabs, setTabs] = useState<DashboardTab[]>([])
   const [activeTabId, setActiveTabId] = useState('')
   const canvasRef = useRef<HTMLDivElement>(null)
-  const [canvasWidth, setCanvasWidth] = useState(0)
-
-  // Measure canvas container width for react-grid-layout
-  useEffect(() => {
-    const el = canvasRef.current
-    if (!el) return
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setCanvasWidth(entry.contentRect.width)
-      }
-    })
-    ro.observe(el)
-    setCanvasWidth(el.clientWidth)
-    return () => ro.disconnect()
-  }, [])
+  const canvasWidth = useContainerWidth(canvasRef)
 
   useEffect(() => {
     if (!id) return
