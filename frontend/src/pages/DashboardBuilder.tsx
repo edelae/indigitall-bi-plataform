@@ -8,7 +8,7 @@ import {
   Calendar, AlignLeft, AlignCenter, AlignRight,
   Filter, ChevronDown as ChevronDownIcon,
 } from 'lucide-react'
-import { Responsive, WidthProvider } from 'react-grid-layout'
+import { Responsive } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import type { DashboardWidget, SavedQuery, ChartType, GridTemplate, DashboardGranularity, DashboardFilter } from '../types'
@@ -23,8 +23,6 @@ import {
 } from '../api/client'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
-
-const ResponsiveGrid = WidthProvider(Responsive)
 
 // Grid constants — IDENTICAL between builder and view
 const GRID_COLS = { lg: 12, md: 12, sm: 6, xs: 4 }
@@ -76,6 +74,26 @@ interface AiPendingResult {
   title: string
 }
 
+// Measure container width for Responsive grid (drag needs accurate width)
+function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) setWidth(entry.contentRect.width)
+    })
+    ro.observe(el)
+    setWidth(el.getBoundingClientRect().width)
+    requestAnimationFrame(() => {
+      const w = el.getBoundingClientRect().width
+      if (w > 0) setWidth(w)
+    })
+    return () => ro.disconnect()
+  }, [ref])
+  return width
+}
+
 interface DashboardTab {
   id: string
   name: string
@@ -119,6 +137,7 @@ export default function DashboardBuilder() {
   const [dragOverZone, setDragOverZone] = useState<number | null>(null)
 
   const canvasRef = useRef<HTMLDivElement>(null)
+  const canvasWidth = useContainerWidth(canvasRef)
 
   // Granularity filter
   const [granularity, setGranularity] = useState<DashboardGranularity>('original')
@@ -878,8 +897,9 @@ export default function DashboardBuilder() {
           )}
 
           {/* Grid */}
-          {widgets.length > 0 && (
-            <ResponsiveGrid
+          {widgets.length > 0 && canvasWidth > 0 && (
+            <Responsive
+              width={canvasWidth}
               layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout, xs: gridLayout }}
               breakpoints={GRID_BREAKPOINTS}
               cols={GRID_COLS}
@@ -1195,7 +1215,7 @@ export default function DashboardBuilder() {
                   </div>
                 </div>
               )})}
-            </ResponsiveGrid>
+            </Responsive>
           )}
         </div>
       </div>
