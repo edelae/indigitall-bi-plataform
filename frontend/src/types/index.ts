@@ -533,15 +533,27 @@ export function transformSqlGranularity(sql: string, granularity: DashboardGranu
 }
 
 // Detect date-like column from data
+const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/
 function findDateColumn(data: Record<string, any>[], columns: string[]): string | null {
-  const datePattern = /^\d{4}-\d{2}-\d{2}/
   for (const col of columns) {
     const sample = data.find(r => r[col] != null && r[col] !== '')
     if (!sample) continue
-    const val = String(sample[col])
-    if (datePattern.test(val)) return col
+    if (DATE_PATTERN.test(String(sample[col]))) return col
   }
   return null
+}
+
+// Parse date string timezone-safe: extract Y/M/D components to avoid UTC shift
+function parseDateLocal(val: any): { year: number; month: number; day: number; dow: number } | null {
+  const m = String(val).match(DATE_PATTERN)
+  if (!m) return null
+  const year = parseInt(m[1]), month = parseInt(m[2]) - 1, day = parseInt(m[3])
+  // Create Date with local timezone (not UTC) to get correct day-of-week
+  const d = new Date(year, month, day)
+  if (isNaN(d.getTime())) return null
+  // getDay() is correct here because we used new Date(y,m,d) which is LOCAL
+  const dow = (d.getDay() + 6) % 7  // Mon=0..Sun=6
+  return { year, month, day, dow }
 }
 
 // Client-side granularity transform — works for ALL widgets with date data
@@ -566,21 +578,17 @@ export function transformDataGranularity(
   const groups = new Map<string, { sortKey: number; rows: Record<string, any>[]; catValues: Record<string, any> }>()
 
   for (const row of data) {
-    const d = new Date(row[dateCol])
-    if (isNaN(d.getTime())) continue
+    const parsed = parseDateLocal(row[dateCol])
+    if (!parsed) continue
 
     let dateKey: string, sortKey: number
     switch (granularity) {
-      case 'dia_semana': {
-        const dow = (d.getDay() + 6) % 7
-        dateKey = DAY_NAMES[dow]; sortKey = dow; break
-      }
-      case 'mes': {
-        dateKey = MONTH_NAMES[d.getMonth()]; sortKey = d.getMonth(); break
-      }
-      case 'anio': {
-        dateKey = String(d.getFullYear()); sortKey = d.getFullYear(); break
-      }
+      case 'dia_semana':
+        dateKey = DAY_NAMES[parsed.dow]; sortKey = parsed.dow; break
+      case 'mes':
+        dateKey = MONTH_NAMES[parsed.month]; sortKey = parsed.month; break
+      case 'anio':
+        dateKey = String(parsed.year); sortKey = parsed.year; break
       default: return null
     }
 

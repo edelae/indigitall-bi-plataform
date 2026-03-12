@@ -432,7 +432,14 @@ export default function DashboardBuilder() {
   // ─── Save ─────────────────────────────────────────────────
   const handleSave = async () => {
     if (!name.trim()) { setFeedback({ type: 'error', text: 'Ingresa un nombre' }); return }
-    const allWidgets = tabs.flatMap(t => t.widgets.map(w => ({ ...w, tab_id: t.id, tab_name: t.name })))
+    // Always save original data (not granularity/filter-transformed data)
+    const allWidgets = tabs.flatMap(t => t.widgets.map(w => ({
+      ...w,
+      tab_id: t.id, tab_name: t.name,
+      data: w.original_data || w.data,
+      columns: w.original_columns || w.columns,
+      sql: w.original_sql || w.sql,
+    })))
     if (!allWidgets.length) { setFeedback({ type: 'error', text: 'Agrega al menos un widget' }); return }
     setSaving(true)
     try {
