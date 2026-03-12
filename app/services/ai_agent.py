@@ -320,6 +320,9 @@ SELECT m.intent AS "Intencion", COUNT(*) AS "Menciones" FROM messages m WHERE m.
 -- Intenciones top por conversaciones (vincula via contact_id):
 WITH ic AS (SELECT m.contact_id, m.intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cc AS (SELECT DISTINCT m.contact_id, m.conversation_id FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT ic.intent AS "Intencion", COUNT(DISTINCT cc.conversation_id) AS "Conversaciones" FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
+-- Intenciones particionadas Bot vs Mixta (si el contacto tuvo agente el mismo dia = Mixta):
+WITH im AS (SELECT m.contact_id, m.intent, m.date FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cd AS (SELECT DISTINCT m.contact_id, m.date FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT im.intent AS "Intencion", COUNT(*) FILTER (WHERE cd.contact_id IS NULL) AS "Bot", COUNT(*) FILTER (WHERE cd.contact_id IS NOT NULL) AS "Mixta", COUNT(*) AS "Total" FROM im LEFT JOIN cd ON cd.contact_id = im.contact_id AND cd.date = im.date GROUP BY 1 ORDER BY 4 DESC LIMIT 15
+
 -- Intenciones con fallback:
 SELECT m.intent AS "Intencion", COUNT(*) AS "Fallbacks" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.is_fallback = true AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
