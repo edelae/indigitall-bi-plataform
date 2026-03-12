@@ -170,22 +170,59 @@ Para SQL (TODAS las consultas de datos):
 Para CLARIFICATION:
 {{"type": "clarification", "response": "Tu pregunta"}}
 
-=== MODELO DE DATOS CRITICO ===
-1. **chat_conversations** (~45K filas): Cada fila = SESION DE AGENTE.
-   - conversation_session_id = conversacion logica (~22K). Usar COUNT(DISTINCT conversation_session_id)
-   - NO tiene columna "date". Usar queued_at (TIMESTAMP): DATE_TRUNC('month', queued_at)
-   - Ejemplo: SELECT DATE_TRUNC('month', queued_at)::date AS periodo, COUNT(DISTINCT conversation_session_id) AS conversaciones FROM chat_conversations WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
+=== MODELO DE DATOS COMPLETO ===
 
-2. **messages** (~126K filas): Cada mensaje individual.
-   - conversation_id = session_id de chat_conversations
-   - Tiene columna "date" (DATE) para agrupar por fecha
-   - Para Bot/Humano, clasificar a nivel conversacion:
-     WITH conv_flags AS (SELECT conversation_id, BOOL_OR(is_bot) AS has_bot, BOOL_OR(is_human) AS has_human, BOOL_OR(is_fallback) AS had_fallback FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND conversation_id IS NOT NULL GROUP BY conversation_id)
-   - Categorias: Bot (has_bot AND NOT has_human), Agente (has_human AND NOT has_bot), Mixta (has_bot AND has_human)
+1. **messages** (~126K filas): Cada mensaje individual de WhatsApp.
+   Columnas: id (serial), tenant_id, message_id (text API ID), conversation_id (text, NULL para mensajes bot-only),
+   contact_id (text), contact_name, agent_id (text, NULL si no hay agente), direction (Inbound|Agent|Bot|System),
+   is_bot (bool), is_human (bool), is_fallback (bool), intent (text, SOLO en direction=Inbound, ~26K mensajes),
+   date (DATE), hour (int 0-23), day_of_week (text en ingles), message_type, body_type
+   - **CRITICO**: conversation_id es NULL en mensajes del bot sin agente. Solo ~50K mensajes tienen conversation_id.
+   - **CRITICO**: intent SOLO existe en mensajes Inbound (direction='Inbound'). Los 26K mensajes con intent tienen conversation_id=NULL.
+   - Para agrupar por fecha: usar m.date (DATE)
+   - Para Bot/Humano con conversation_id: BOOL_OR(m.is_bot), BOOL_OR(m.is_human) GROUP BY m.conversation_id
 
-3. **nps_surveys** (928): score_atencion, score_asesor, nps_categoria, canal_tipo, entity
+2. **chat_conversations** (~45K filas): Sesiones de agente del Contact Center.
+   Columnas: id, tenant_id, session_id (text), conversation_session_id (text, ~22K unicos),
+   queued_at (TIMESTAMP), accepted_at, closed_at, agent_id, channel ('cloudapi'), status, source
+   - NO tiene columna "date". Usar queued_at: DATE_TRUNC('day', cc.queued_at)::date
+   - Para conversaciones reales: COUNT(DISTINCT cc.conversation_session_id)
 
-4. CRITICO: messages tiene "date" (DATE), chat_conversations tiene "queued_at" (TIMESTAMP). NUNCA usar "date" en chat_conversations.
+3. **contacts** (~1.3K): contact_id, contact_name, total_messages, first_contact, last_contact, total_conversations
+
+4. **agents** (~175): agent_id, agent_name, email, status, role
+
+5. **nps_surveys** (~928): id, tenant_id, score_atencion (1-5), score_asesor (1-5), nps_categoria (Promotor/Neutro/Detractor), canal_tipo, entity, created_at
+
+6. **sms_envios** (~7.2M): sending_id, tenant_id, campaign_id, phone, sent_at, status (sent/delivered/rejected/error), clicks, cost, country_code
+   - sms_daily_stats (91): date, total_sent, total_delivered, total_chunks, total_clicks, unique_contacts, total_cost
+   - sms_campaigns (9): campaign_id, name, status, total_sendings
+
+7. **toques_daily** (273): tenant_id, project_name, channel_type, date, sends, deliveries, impressions, clicks, errors
+   - toques_heatmap (105): tenant_id, project_name, channel_type, day_of_week, hour, sends
+
+=== RELACIONES CRITICAS ===
+- messages.conversation_id = chat_conversations.session_id (SOLO mensajes con agente)
+- messages.contact_id = contacts.contact_id
+- messages.agent_id = agents.agent_id (SOLO direction='Agent')
+- Mensajes con intent (direction='Inbound') NO tienen conversation_id — consultar DIRECTAMENTE en messages sin JOIN
+- nps_surveys se relaciona con chat_conversations via entity/canal_tipo (no hay FK directa)
+
+=== INTENCIONES (INTENTS) — MUY IMPORTANTE ===
+- intent esta SOLO en mensajes Inbound (del usuario al bot). Son ~26K mensajes.
+- Estos mensajes tienen conversation_id=NULL. NO usar conversation_id para agrupar intents.
+- Para consultar intents, SIEMPRE consultar directamente messages:
+  SELECT m.intent AS "Intencion", COUNT(*) AS "Mensajes"
+  FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''
+  GROUP BY m.intent ORDER BY "Mensajes" DESC LIMIT 15
+- Para intents con fallback:
+  SELECT m.intent AS "Intencion", COUNT(*) AS "Fallbacks"
+  FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' AND m.is_fallback = true
+  GROUP BY m.intent ORDER BY "Fallbacks" DESC LIMIT 15
+- Para intents por fecha:
+  SELECT m.date AS "Fecha", m.intent AS "Intencion", COUNT(*) AS "Mensajes"
+  FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''
+  GROUP BY 1, 2 ORDER BY 1 LIMIT 500
 
 === TIPO DE GRAFICA (chart_type) ===
 - "line" — datos temporales/tendencias
@@ -200,53 +237,34 @@ Para CLARIFICATION:
 
 === REGLAS SQL CRITICAS ===
 - Solo SELECT (o WITH ... SELECT)
-- Tablas core: messages (m), contacts (c), agents (a), daily_stats (ds), chat_conversations (cc), campaigns (ca), toques_daily (td), toques_heatmap (th), nps_surveys (ns), sms_envios (se), sms_daily_stats (sd)
-- Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
-- SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}'
-- SIEMPRE incluir LIMIT (max 1000)
+- Tablas: messages (m), contacts (c), agents (a), daily_stats (ds), chat_conversations (cc), campaigns (ca), toques_daily (td), toques_heatmap (th), nps_surveys (ns), sms_envios (se), sms_daily_stats (sd), sms_campaigns (sc)
+- SIEMPRE WHERE alias.tenant_id = '{{TENANT_ID}}' y LIMIT (max 1000)
 - Alias legibles en espanol (AS "Fecha", AS "Total Mensajes")
-- **CRITICO**: Cuando uses JOIN, SIEMPRE usa alias de tabla (m, cc, c, etc.) y califica TODAS las columnas con el alias (m.tenant_id, cc.queued_at, m.date). NUNCA escribas tenant_id sin alias en JOINs — causa error "ambiguous column".
-- **CRITICO**: En JOINs, pon WHERE alias.tenant_id = '{{TENANT_ID}}' en la tabla principal (FROM).
+- **CRITICO**: En JOINs SIEMPRE usar alias y calificar TODAS las columnas (m.tenant_id, cc.queued_at, m.date). NUNCA tenant_id sin alias — causa error "ambiguous column".
 
-=== INTENCIONES (INTENTS) ===
-- La columna intent esta en la tabla messages. Cada mensaje puede tener un intent.
-- Para obtener el intent de una conversacion, usa el ULTIMO intent no-nulo de la conversacion:
-  WITH last_intent AS (
-    SELECT m.conversation_id,
-           (ARRAY_AGG(m.intent ORDER BY m.date DESC, m.id DESC) FILTER (WHERE m.intent IS NOT NULL AND m.intent != ''))[1] AS intent
-    FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id
-  )
-  SELECT li.intent AS "Intencion", COUNT(*) AS "Conversaciones" FROM last_intent li WHERE li.intent IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20
+=== CONSULTAS DE REFERENCIA ===
 
-=== CONSULTAS COMUNES (SQL de referencia) ===
+Intenciones top:
+SELECT m.intent AS "Intencion", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
-Resumen general:
-SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}'
-UNION ALL SELECT 'Contactos', COUNT(DISTINCT m.contact_id)::text FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}'
-UNION ALL SELECT 'Conversaciones', COUNT(DISTINCT m.conversation_id)::text FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL
-LIMIT 10
+Intenciones que producen fallback:
+SELECT m.intent AS "Intencion", COUNT(*) AS "Fallbacks" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.is_fallback = true AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
 Tendencia diaria:
 SELECT m.date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
 
-Top contactos:
-SELECT m.contact_name AS "Contacto", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.contact_name IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+Conversaciones por tipo (Bot/Agente/Mixta):
+WITH cf AS (SELECT m.conversation_id, MIN(m.date) AS fecha, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
+SELECT cf.fecha AS "Fecha", CASE WHEN cf.has_bot AND NOT cf.has_human THEN 'Bot' WHEN cf.has_human AND NOT cf.has_bot THEN 'Agente' ELSE 'Mixta' END AS "Tipo", COUNT(*) AS "Conversaciones" FROM cf GROUP BY 1, 2 ORDER BY 1 LIMIT 500
 
-Rendimiento de agentes:
+Fallbacks por mes:
+SELECT DATE_TRUNC('month', m.date)::date AS "Mes", COUNT(*) AS "Fallbacks" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.is_fallback = true GROUP BY 1 ORDER BY 1 LIMIT 24
+
+Top agentes:
 SELECT m.agent_id AS "Agente", COUNT(*) AS "Mensajes", COUNT(DISTINCT m.conversation_id) AS "Conversaciones" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
-Conversaciones por fecha clasificadas por tipo (Bot/Agente/Mixta):
-WITH conv_flags AS (
-  SELECT m.conversation_id, MIN(m.date) AS fecha,
-         BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human
-  FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id
-)
-SELECT cf.fecha AS "Fecha",
-       CASE WHEN cf.has_bot AND NOT cf.has_human THEN 'Bot'
-            WHEN cf.has_human AND NOT cf.has_bot THEN 'Agente'
-            ELSE 'Mixta' END AS "Tipo",
-       COUNT(*) AS "Conversaciones"
-FROM conv_flags cf GROUP BY 1, 2 ORDER BY 1 LIMIT 500
+SMS tendencia:
+SELECT sd.date AS "Fecha", sd.total_sent AS "Enviados", sd.total_delivered AS "Entregados", sd.total_clicks AS "Clicks" FROM sms_daily_stats sd WHERE sd.tenant_id = '{{TENANT_ID}}' ORDER BY 1 LIMIT 100
 """
 
     def _get_system_prompt_openai(self) -> str:
@@ -264,28 +282,29 @@ FROM conv_flags cf GROUP BY 1, 2 ORDER BY 1 LIMIT 500
 - Si la pregunta es ambigua, usa ask_clarification
 - NUNCA respondas con texto plano cuando el usuario pide datos. Siempre genera SQL.
 
-=== MODELO DE DATOS CRITICO ===
-1. chat_conversations: Cada fila = SESION DE AGENTE (~45K). COUNT(DISTINCT conversation_session_id) para conversaciones reales (~22K). NO tiene "date" — usar queued_at (TIMESTAMP)
-2. messages (~126K): conversation_id = session_id. Tiene "date" (DATE). Bot/Humano: BOOL_OR por conversation_id
-3. nps_surveys (928): score_atencion, score_asesor, nps_categoria, canal_tipo, entity
-4. CRITICO: messages.date (DATE) vs chat_conversations.queued_at (TIMESTAMP). NUNCA "date" en chat_conversations.
+=== MODELO DE DATOS COMPLETO ===
+1. **messages** (~126K): id, tenant_id, message_id, conversation_id (NULL para bot-only), contact_id, contact_name, agent_id, direction (Inbound|Agent|Bot|System), is_bot, is_human, is_fallback, intent (SOLO en Inbound, ~26K msgs, conversation_id=NULL), date (DATE), hour, day_of_week, message_type, body_type
+2. **chat_conversations** (~45K): session_id, conversation_session_id (~22K unicos), queued_at (TIMESTAMP, NO tiene "date"), accepted_at, closed_at, agent_id, channel, status
+3. **contacts** (~1.3K): contact_id, contact_name, total_messages, first_contact, last_contact
+4. **agents** (~175): agent_id, agent_name, email, status, role
+5. **nps_surveys** (~928): score_atencion (1-5), score_asesor (1-5), nps_categoria (Promotor/Neutro/Detractor), canal_tipo, entity
+6. **sms_envios** (~7.2M): sending_id, campaign_id, phone, sent_at, status, clicks, cost. sms_daily_stats (91): date, total_sent, total_delivered, total_clicks. sms_campaigns (9): campaign_id, name
+7. **toques_daily** (273): project_name, channel_type, date, sends, deliveries, clicks, errors
 
-=== REGLAS SQL CRITICAS ===
-- Solo SELECT (o WITH ... SELECT)
-- Tablas: messages (m), contacts (c), agents (a), daily_stats (ds), chat_conversations (cc), campaigns (ca), toques_daily (td), toques_heatmap (th), nps_surveys (ns), sms_envios (se), sms_daily_stats (sd)
-- Marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, etc.
-- SIEMPRE WHERE alias.tenant_id = '{{TENANT_ID}}' y LIMIT
-- **CRITICO**: En JOINs SIEMPRE usar alias y calificar TODAS las columnas (m.tenant_id, cc.queued_at). NUNCA tenant_id sin alias — causa error "ambiguous column".
+=== RELACIONES CRITICAS ===
+- messages.conversation_id = chat_conversations.session_id (SOLO mensajes con agente)
+- Mensajes con intent (direction=Inbound) NO tienen conversation_id. Consultar intents DIRECTAMENTE en messages sin JOIN.
+- messages.date (DATE) vs chat_conversations.queued_at (TIMESTAMP). NUNCA "date" en chat_conversations.
+
+=== REGLAS SQL ===
+- Solo SELECT/WITH. SIEMPRE WHERE alias.tenant_id = '{{TENANT_ID}}' y LIMIT (max 1000)
+- En JOINs: SIEMPRE alias y calificar TODAS las columnas (m.tenant_id, cc.queued_at). NUNCA tenant_id sin alias.
 - Alias legibles en espanol
 
-=== INTENCIONES ===
-- intent esta en messages. Para intent de conversacion, usar el ULTIMO intent no-nulo:
-  WITH last_intent AS (SELECT m.conversation_id, (ARRAY_AGG(m.intent ORDER BY m.date DESC, m.id DESC) FILTER (WHERE m.intent IS NOT NULL AND m.intent != ''))[1] AS intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
-
 === CONSULTAS DE REFERENCIA ===
-Resumen: SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' UNION ALL SELECT 'Contactos', COUNT(DISTINCT m.contact_id)::text FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' LIMIT 10
+Intenciones top: SELECT m.intent AS "Intencion", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+Fallbacks por intent: SELECT m.intent AS "Intencion", COUNT(*) AS "Fallbacks" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.is_fallback = true AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 Tendencia: SELECT m.date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
-Agentes: SELECT m.agent_id AS "Agente", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 Conv. por tipo: WITH cf AS (SELECT m.conversation_id, MIN(m.date) AS fecha, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id) SELECT cf.fecha AS "Fecha", CASE WHEN cf.has_bot AND NOT cf.has_human THEN 'Bot' WHEN cf.has_human AND NOT cf.has_bot THEN 'Agente' ELSE 'Mixta' END AS "Tipo", COUNT(*) AS "Conversaciones" FROM cf GROUP BY 1, 2 ORDER BY 1 LIMIT 500
 """
 
