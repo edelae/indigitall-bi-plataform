@@ -248,6 +248,23 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 12. "high_messages_week" — Clientes con mas de 4 mensajes en una semana
 13. "high_messages_month" — Clientes con mas de 4 mensajes en un mes
 
+=== MODELO DE DATOS CRITICO ===
+ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
+
+1. **chat_conversations**: Cada fila es una SESION DE AGENTE (~45K filas), NO una conversacion unica.
+   - conversation_session_id = conversacion logica (~22K unicas). Para contar "conversaciones" SIEMPRE usar COUNT(DISTINCT conversation_session_id)
+   - session_id = sesion individual de agente. Una conversacion puede tener multiples sesiones (transferencias entre agentes)
+
+2. **messages** (~126K filas): Cada fila es un mensaje individual.
+   - conversation_id = corresponde a session_id de chat_conversations
+   - Para metricas BOT/HUMANO, clasificar A NIVEL DE CONVERSACION (no mensaje):
+     ```WITH conv_flags AS (SELECT conversation_id, BOOL_OR(is_bot) AS has_bot, BOOL_OR(is_human) AS has_human, BOOL_OR(is_fallback) AS had_fallback FROM messages GROUP BY conversation_id)```
+   - Categorias: Bot (solo has_bot), Agente (solo has_human), Mixta (has_bot AND has_human)
+
+3. **nps_surveys** (928 registros): score_atencion, score_asesor, nps_categoria (Promotor/Pasivo/Detractor), canal_tipo, entity
+
+4. Si el usuario pide un KPI/tarjeta/numero unico, usa chart_type: "kpi"
+
 === REGLAS PARA SQL ===
 - Solo SELECT (no INSERT, UPDATE, DELETE, DROP, etc.)
 - Tablas core (esquema public): messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
@@ -295,6 +312,12 @@ IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
 - Si la pregunta es ambigua, usa ask_clarification
 - Prefiere funciones pre-built sobre SQL ad-hoc cuando sea posible
 - En SQL: SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}' y LIMIT
+
+=== MODELO DE DATOS CRITICO ===
+1. chat_conversations: Cada fila = SESION DE AGENTE (~45K). Para "conversaciones reales" usar COUNT(DISTINCT conversation_session_id) (~22K).
+2. messages (~126K): conversation_id = session_id de chat_conversations. Para Bot/Humano, clasificar a nivel conversacion: WITH conv_flags AS (SELECT conversation_id, BOOL_OR(is_bot) AS has_bot, BOOL_OR(is_human) AS has_human FROM messages GROUP BY conversation_id)
+3. nps_surveys (928): score_atencion, score_asesor, nps_categoria (Promotor/Pasivo/Detractor), canal_tipo, entity
+4. Para KPIs/tarjetas/numeros unicos, usar chart_type: "kpi"
 
 === REGLAS SQL ===
 - Solo SELECT. Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats

@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import KpiCard from '../components/KpiCard'
 import ChartWidget from '../components/ChartWidget'
+import DashboardAnalyst from '../components/DashboardAnalyst'
 import { fetchAnalytics, saveQuery, saveDashboard } from '../api/client'
 import { exportCsv } from '../utils/csvExport'
 import type { ChartType, DashboardWidget } from '../types'
@@ -703,6 +704,25 @@ export default function DashboardWhatsAppNPS() {
           {!currentState.loading && !currentState.error && !currentState.data && !currentState.fetched && renderLoading()}
         </div>
       </div>
+
+      {/* AI Analyst Panel */}
+      <DashboardAnalyst
+        context={{
+          activeTab,
+          kpis: collectKpis(),
+          dateRange: startDate && endDate ? { start: startDate, end: endDate } : undefined,
+        }}
+      />
     </div>
   )
+
+  function collectKpis(): Record<string, string | number> {
+    const kpis: Record<string, string | number> = {}
+    const tabData = activeTab === 'general' ? general : botTab
+    if (!tabData?.data?.kpis) return kpis
+    for (const [key, val] of Object.entries(tabData.data.kpis)) {
+      if (val !== null && val !== undefined) kpis[key] = val as string | number
+    }
+    return kpis
+  }
 }

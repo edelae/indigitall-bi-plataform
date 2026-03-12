@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Send, Download, Bookmark, BarChart3, Loader2, Code, Sparkles, Database,
-  Table2, Settings2,
+  Table2, Settings2, Play, Pencil,
 } from 'lucide-react'
 import ChatMessage from '../components/ChatMessage'
 import ChartWidget from '../components/ChartWidget'
@@ -10,7 +10,7 @@ import DataTable from '../components/DataTable'
 import KpiCard from '../components/KpiCard'
 import ChartCustomizer, { type ChartConfig } from '../components/ChartCustomizer'
 import type { ChatMessage as ChatMsg, QueryResult, ChartType, TableInfo } from '../types'
-import { sendChat, saveQuery, getQuery, listTables } from '../api/client'
+import { sendChat, saveQuery, getQuery, listTables, executeSql } from '../api/client'
 import { PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 
 const SUGGESTIONS = [
@@ -40,6 +40,9 @@ export default function QueryChat() {
     chartType: 'bar',
     showLegend: true,
   })
+  const [editingSql, setEditingSql] = useState(false)
+  const [sqlText, setSqlText] = useState('')
+  const [sqlRunning, setSqlRunning] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Load tables for source panel
@@ -362,20 +365,69 @@ export default function QueryChat() {
                   </div>
                 )}
 
-                {/* SQL block (visible when query has SQL) */}
+                {/* SQL block — editable */}
                 {lastResult.query_details?.sql && (
                   <details className="card p-3 mb-4" open>
                     <summary className="flex items-center gap-2 cursor-pointer text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                       <Code size={13} className="text-primary" />
-                      SQL Ejecutado
+                      SQL {editingSql ? '(Editando)' : 'Ejecutado'}
                       {lastResult.query_details?.function && (
                         <span className="badge badge-primary ml-2 normal-case">{lastResult.query_details.function}</span>
                       )}
                     </summary>
-                    <pre className="mt-2 p-3 rounded-btn text-xs overflow-x-auto max-h-48 font-mono whitespace-pre-wrap"
-                      style={{ backgroundColor: 'var(--tooltip-bg)', color: '#D1D5DB' }}>
-                      {lastResult.query_details.sql}
-                    </pre>
+                    {editingSql ? (
+                      <div className="mt-2">
+                        <textarea
+                          className="w-full p-3 rounded-btn text-xs font-mono resize-y"
+                          style={{ backgroundColor: 'var(--tooltip-bg)', color: '#D1D5DB', minHeight: 120, border: '1px solid var(--border)' }}
+                          value={sqlText}
+                          onChange={e => setSqlText(e.target.value)}
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            className="btn-primary text-xs flex items-center gap-1 px-3 py-1.5"
+                            disabled={sqlRunning || !sqlText.trim()}
+                            onClick={async () => {
+                              setSqlRunning(true)
+                              try {
+                                const res = await executeSql(sqlText)
+                                setLastResult({
+                                  ...lastResult,
+                                  data: res.data,
+                                  columns: res.columns,
+                                  query_details: { ...lastResult.query_details, sql: sqlText },
+                                })
+                              } catch (err: any) {
+                                alert('Error SQL: ' + (err.message || 'Error desconocido'))
+                              } finally {
+                                setSqlRunning(false)
+                              }
+                            }}
+                          >
+                            {sqlRunning ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                            Ejecutar
+                          </button>
+                          <button className="btn-ghost text-xs px-3 py-1.5" onClick={() => setEditingSql(false)}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 relative group">
+                        <pre className="p-3 rounded-btn text-xs overflow-x-auto max-h-48 font-mono whitespace-pre-wrap"
+                          style={{ backgroundColor: 'var(--tooltip-bg)', color: '#D1D5DB' }}>
+                          {lastResult.query_details.sql}
+                        </pre>
+                        <button
+                          onClick={() => { setSqlText(lastResult.query_details?.sql || ''); setEditingSql(true) }}
+                          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-btn transition-opacity"
+                          style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}
+                          title="Editar SQL"
+                        >
+                          <Pencil size={12} className="text-white" />
+                        </button>
+                      </div>
+                    )}
                   </details>
                 )}
 

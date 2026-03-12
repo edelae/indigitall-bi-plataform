@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle } from 'lucide-react'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
+import DashboardAnalyst from '../components/DashboardAnalyst'
 import type { Dashboard, DashboardWidget, ChartType } from '../types'
 import { PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 import { getDashboard } from '../api/client'
@@ -367,6 +368,14 @@ export default function DashboardView() {
           </div>
         )}
       </div>
+
+      {/* AI Analyst Panel */}
+      <DashboardAnalyst
+        context={{
+          activeTab: activeTabId,
+          kpis: {},
+        }}
+      />
 
       {/* Info Modal */}
       {infoModal && (

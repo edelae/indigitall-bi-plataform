@@ -76,6 +76,13 @@ export async function archiveQuery(id: number): Promise<{ success: boolean }> {
   return request(`/queries/${id}/archive`, { method: 'POST' })
 }
 
+export async function executeSql(sql: string): Promise<{ data: Record<string, any>[]; columns: string[]; row_count: number }> {
+  return request('/execute-sql', {
+    method: 'POST',
+    body: JSON.stringify({ sql }),
+  })
+}
+
 // Dashboards
 export async function listDashboards(params?: {
   limit?: number
