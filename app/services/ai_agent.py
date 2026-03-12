@@ -269,11 +269,14 @@ FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER
 **Para agentes**: La tabla agents NO tiene agent_name. Usar cc.agent_email de chat_conversations.
 
 === INTENCIONES (INTENTS) — REGLAS CRITICAS ===
-- intent existe en mensajes Inbound (~26K). TODOS tienen conversation_id=NULL.
+- intent existe en mensajes Inbound (~26K). TODOS tienen conversation_id=NULL y is_bot=False.
 - NUNCA usar COUNT(DISTINCT m.conversation_id) directo con intents — retorna 0.
+- NUNCA usar BOOL_OR(is_bot) para clasificar intents — siempre es False.
 - Para "intenciones por menciones": COUNT(*) directo en messages.
-- Para "intenciones por conversacion": vincular via contact_id con esta CTE:
+- Para "intenciones por conversacion": vincular via contact_id:
   WITH ic AS (SELECT m.contact_id, m.intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cc AS (SELECT DISTINCT m.contact_id, m.conversation_id FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT ic.intent AS "Intencion", COUNT(DISTINCT cc.conversation_id) AS "Conversaciones" FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+- Para "intenciones Bot vs Mixta": un intent es "Mixta" si el contacto tuvo agente EL MISMO DIA, "Bot" si no. SIEMPRE usar este patron exacto:
+  WITH im AS (SELECT m.contact_id, m.intent, m.date FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cd AS (SELECT DISTINCT m.contact_id, m.date FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT im.intent AS "Intencion", COUNT(*) FILTER (WHERE cd.contact_id IS NULL) AS "Bot", COUNT(*) FILTER (WHERE cd.contact_id IS NOT NULL) AS "Mixta", COUNT(*) AS "Total" FROM im LEFT JOIN cd ON cd.contact_id = im.contact_id AND cd.date = im.date GROUP BY 1 ORDER BY 4 DESC LIMIT 15
 
 === TIPO DE GRAFICA (chart_type) ===
 - "line" — datos temporales/tendencias
@@ -384,7 +387,7 @@ El eje central de analisis es la **CONVERSACION**, NO el mensaje individual.
 === RELACIONES ===
 - messages.conversation_id = chat_conversations.session_id (SOLO con agente)
 - nps_surveys.conversation_id = chat_conversations.session_id
-- INTENTS: conversation_id=NULL en TODOS los mensajes con intent. NUNCA usar COUNT(DISTINCT conversation_id) directo (retorna 0). Para vincular intents a conversaciones, usar JOIN via contact_id: WITH ic AS (SELECT contact_id, intent FROM messages WHERE ...), cc AS (SELECT DISTINCT contact_id, conversation_id FROM messages WHERE conversation_id IS NOT NULL) SELECT ic.intent, COUNT(DISTINCT cc.conversation_id) FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1
+- INTENTS: conversation_id=NULL y is_bot=False en TODOS los msgs con intent. NUNCA COUNT(DISTINCT conversation_id) ni BOOL_OR(is_bot) con intents. Para Bot vs Mixta usar: WITH im AS (SELECT contact_id, intent, date FROM messages WHERE intent IS NOT NULL AND intent <> ''), cd AS (SELECT DISTINCT contact_id, date FROM messages WHERE conversation_id IS NOT NULL) SELECT im.intent, COUNT(*) FILTER (WHERE cd.contact_id IS NULL) AS Bot, COUNT(*) FILTER (WHERE cd.contact_id IS NOT NULL) AS Mixta FROM im LEFT JOIN cd ON cd.contact_id = im.contact_id AND cd.date = im.date GROUP BY 1
 - messages.date (DATE) vs chat_conversations.queued_at (TIMESTAMP)
 
 === FLUJO DE CONVERSACIONES ===
