@@ -1,26 +1,34 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
   Save, ArrowLeft, Plus, X, Info, Loader2,
   Sparkles, Send, GripVertical, LayoutTemplate,
   Type, Link as LinkIcon, Pencil, Palette, Eye, EyeOff,
+  Calendar, AlignLeft, AlignCenter, AlignRight,
+  Filter, ChevronDown as ChevronDownIcon,
 } from 'lucide-react'
-import { Responsive } from 'react-grid-layout'
+import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
-import type { DashboardWidget, SavedQuery, ChartType, GridTemplate } from '../types'
-import { GRID_TEMPLATES, PRIMARY_COLOR, COLOR_PALETTES, FONT_FAMILIES, SIZE_PRESETS } from '../types'
+import type { DashboardWidget, SavedQuery, ChartType, GridTemplate, DashboardGranularity, DashboardFilter } from '../types'
+import {
+  GRID_TEMPLATES, PRIMARY_COLOR, COLOR_PALETTES, FONT_FAMILIES, SIZE_PRESETS,
+  CARD_STYLE_PRESETS, GRANULARITY_OPTIONS, transformSqlGranularity, getCardStyle,
+  detectFilterableColumns, applyDashboardFilters,
+} from '../types'
 import {
   listQueries, getQuery, getDashboard,
-  saveDashboard, updateDashboard, sendChat, saveQuery,
+  saveDashboard, updateDashboard, sendChat, saveQuery, executeSql,
 } from '../api/client'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
+const ResponsiveGrid = WidthProvider(Responsive)
+
 // Grid constants — IDENTICAL between builder and view
-const GRID_COLS = { lg: 12, md: 10, sm: 6, xs: 4 }
-const GRID_BREAKPOINTS = { lg: 1200, md: 996, sm: 768, xs: 480 }
+const GRID_COLS = { lg: 12, md: 12, sm: 6, xs: 4 }
+const GRID_BREAKPOINTS = { lg: 1200, md: 900, sm: 600, xs: 0 }
 const GRID_ROW_HEIGHT = 80
 const GRID_MARGIN: [number, number] = [8, 8]
 const GRID_PADDING: [number, number] = [8, 8]
@@ -68,27 +76,6 @@ interface AiPendingResult {
   title: string
 }
 
-// Hook: measure container width via ResizeObserver (with rAF fallback)
-function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
-  const [width, setWidth] = useState(0)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) setWidth(entry.contentRect.width)
-    })
-    ro.observe(el)
-    setWidth(el.getBoundingClientRect().width)
-    // Fallback: re-measure after layout paint in case initial width was 0
-    requestAnimationFrame(() => {
-      const w = el.getBoundingClientRect().width
-      if (w > 0) setWidth(w)
-    })
-    return () => ro.disconnect()
-  }, [ref])
-  return width
-}
-
 interface DashboardTab {
   id: string
   name: string
@@ -131,9 +118,16 @@ export default function DashboardBuilder() {
   const [dragOverCanvas, setDragOverCanvas] = useState(false)
   const [dragOverZone, setDragOverZone] = useState<number | null>(null)
 
-  // Canvas width via ResizeObserver
   const canvasRef = useRef<HTMLDivElement>(null)
-  const canvasWidth = useContainerWidth(canvasRef)
+
+  // Granularity filter
+  const [granularity, setGranularity] = useState<DashboardGranularity>('original')
+  const [granLoading, setGranLoading] = useState(false)
+
+  // Dashboard-level variable filters
+  const [dashFilters, setDashFilters] = useState<DashboardFilter[]>([])
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  const [filterLoading, setFilterLoading] = useState(false)
 
   // ─── Helpers ──────────────────────────────────────────────
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0]
@@ -174,6 +168,7 @@ export default function DashboardBuilder() {
             if (!tabMap.has(tid)) tabMap.set(tid, { id: tid, name: tname, widgets: [] })
             tabMap.get(tid)!.widgets.push({
               ...w,
+              original_sql: w.sql || w.original_sql,
               grid_i: w.grid_i || `widget-${Math.random().toString(36).slice(2)}`,
               grid_x: w.grid_x ?? 0, grid_y: w.grid_y ?? 0,
               grid_w: w.grid_w ?? w.width ?? 6, grid_h: w.grid_h ?? 4,
@@ -185,6 +180,7 @@ export default function DashboardBuilder() {
         } else {
           const loaded = layout.map((w: DashboardWidget, i: number) => ({
             ...w,
+            original_sql: w.sql || w.original_sql,
             grid_i: w.grid_i || `widget-${i}`,
             grid_x: w.grid_x ?? (i % 2) * 6, grid_y: w.grid_y ?? Math.floor(i / 2) * 4,
             grid_w: w.grid_w ?? w.width ?? 6, grid_h: w.grid_h ?? 4,
@@ -286,6 +282,103 @@ export default function DashboardBuilder() {
       if (input) { input.focus(); input.select() }
     })
   }, [])
+
+  // ─── Granularity filter ────────────────────────────────────
+  const hasDateTruncWidgets = tabs.some(t => t.widgets.some(w => (w.original_sql || w.sql || '').match(/DATE_TRUNC/i)))
+
+  const handleGranularityChange = useCallback(async (gran: DashboardGranularity) => {
+    setGranularity(gran)
+    if (gran === 'original') {
+      // Restore original SQL for all widgets
+      setTabs(prev => prev.map(tab => ({
+        ...tab,
+        widgets: tab.widgets.map(w => {
+          if (!w.original_sql) return w
+          return { ...w, sql: w.original_sql }
+        }),
+      })))
+      return
+    }
+    setGranLoading(true)
+    const newTabs = await Promise.all(tabs.map(async tab => {
+      const newWidgets = await Promise.all(tab.widgets.map(async w => {
+        const origSql = w.original_sql || w.sql
+        if (!origSql || !origSql.match(/DATE_TRUNC/i)) return w
+        const transformed = transformSqlGranularity(origSql, gran)
+        try {
+          const res = await executeSql(transformed)
+          return { ...w, data: res.data, columns: res.columns, sql: transformed, original_sql: origSql }
+        } catch { return w }
+      }))
+      return { ...tab, widgets: newWidgets }
+    }))
+    setTabs(newTabs)
+    setGranLoading(false)
+  }, [tabs])
+
+  // ─── Dashboard filters ──────────────────────────────────
+  const availableFilterColumns = useMemo(() => {
+    const allWidgets = tabs.flatMap(t => t.widgets)
+    return detectFilterableColumns(allWidgets)
+  }, [tabs])
+
+  const addDashFilter = (col: string) => {
+    if (dashFilters.some(f => f.column === col)) return
+    const colInfo = availableFilterColumns.find(c => c.column === col)
+    if (!colInfo) return
+    setDashFilters(prev => [...prev, {
+      id: `filter-${Date.now()}`,
+      column: col,
+      label: col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      values: colInfo.values,
+      selected: [],
+    }])
+  }
+
+  const removeDashFilter = (id: string) => {
+    setDashFilters(prev => prev.filter(f => f.id !== id))
+  }
+
+  const toggleFilterValue = (filterId: string, value: string) => {
+    setDashFilters(prev => prev.map(f => {
+      if (f.id !== filterId) return f
+      const sel = f.selected.includes(value)
+        ? f.selected.filter(v => v !== value)
+        : [...f.selected, value]
+      return { ...f, selected: sel }
+    }))
+  }
+
+  const applyFilters = useCallback(async () => {
+    const activeFilters = dashFilters.filter(f => f.selected.length > 0 && f.selected.length < f.values.length)
+    if (!activeFilters.length) {
+      // Reset to original data
+      setTabs(prev => prev.map(tab => ({
+        ...tab,
+        widgets: tab.widgets.map(w => {
+          if (!w.original_sql) return w
+          return { ...w, sql: w.original_sql }
+        }),
+      })))
+      return
+    }
+    setFilterLoading(true)
+    const newTabs = await Promise.all(tabs.map(async tab => {
+      const newWidgets = await Promise.all(tab.widgets.map(async w => {
+        const origSql = w.original_sql || w.sql
+        if (!origSql) return w
+        const filtered = applyDashboardFilters(origSql, activeFilters)
+        if (filtered === origSql) return w
+        try {
+          const res = await executeSql(filtered)
+          return { ...w, data: res.data, columns: res.columns, sql: filtered, original_sql: origSql }
+        } catch { return w }
+      }))
+      return { ...tab, widgets: newWidgets }
+    }))
+    setTabs(newTabs)
+    setFilterLoading(false)
+  }, [tabs, dashFilters])
 
   // ─── Tab actions ──────────────────────────────────────────
   const addTab = () => {
@@ -460,6 +553,10 @@ export default function DashboardBuilder() {
               {templateVisible ? <EyeOff size={13} /> : <Eye size={13} />}
             </button>
           )}
+          <button onClick={() => setFilterPanelOpen(!filterPanelOpen)}
+            className={`btn-secondary flex items-center gap-1 text-xs px-2.5 py-1.5 ${dashFilters.length > 0 ? 'ring-1 ring-primary/30' : ''}`}>
+            <Filter size={13} /> Filtros {dashFilters.length > 0 && <span className="bg-primary text-white text-[9px] px-1.5 py-0.5 rounded-full">{dashFilters.length}</span>}
+          </button>
           <button onClick={addTitleBlock} className="btn-secondary flex items-center gap-1 text-xs px-2.5 py-1.5"><Type size={13} /> Titulo</button>
           <button onClick={addTextCard} className="btn-secondary flex items-center gap-1 text-xs px-2.5 py-1.5"><LinkIcon size={13} /> Tarjeta</button>
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-1 text-xs px-3 py-1.5">
@@ -474,6 +571,129 @@ export default function DashboardBuilder() {
         <div className={`mb-3 px-4 py-2 rounded-lg text-sm ${feedback.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
           {feedback.text}
           {feedback.type === 'success' && dashboardId && <Link to={`/tableros/saved/${dashboardId}`} className="ml-2 underline">Ver tablero</Link>}
+        </div>
+      )}
+
+      {/* Granularity filter bar */}
+      {hasDateTruncWidgets && (
+        <div className="flex items-center gap-2 mb-3 px-1">
+          <Calendar size={14} className="text-[#6B7280]" />
+          <span className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">Agrupar por:</span>
+          <div className="flex gap-1">
+            {GRANULARITY_OPTIONS.map(opt => (
+              <button key={opt.value}
+                onClick={() => handleGranularityChange(opt.value)}
+                disabled={granLoading}
+                className={`px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                  granularity === opt.value
+                    ? 'bg-[#1E88E5] text-white shadow-sm'
+                    : 'bg-white text-[#6B7280] border border-[#E5E7EB] hover:border-[#1E88E5] hover:text-[#1E88E5]'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {granLoading && <Loader2 size={14} className="animate-spin text-primary" />}
+        </div>
+      )}
+
+      {/* Dashboard Filters Panel */}
+      {filterPanelOpen && (
+        <div className="mb-3 bg-white border border-[#E5E7EB] rounded-lg shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#E5E7EB] bg-[#F9FAFB]">
+            <div className="flex items-center gap-2">
+              <Filter size={14} className="text-primary" />
+              <h3 className="text-xs font-semibold text-[#374151]">Filtros del tablero</h3>
+              <span className="text-[9px] text-[#9CA3AF]">Filtra todas las graficas a la vez</span>
+            </div>
+            <button onClick={() => setFilterPanelOpen(false)} className="p-0.5 hover:bg-gray-100 rounded"><X size={14} /></button>
+          </div>
+          <div className="p-3">
+            {/* Available columns to add as filters */}
+            {availableFilterColumns.length > 0 ? (
+              <div className="mb-3">
+                <p className="text-[10px] text-[#9CA3AF] uppercase tracking-wider mb-1.5">Columnas disponibles</p>
+                <div className="flex flex-wrap gap-1">
+                  {availableFilterColumns.map(c => {
+                    const alreadyAdded = dashFilters.some(f => f.column === c.column)
+                    return (
+                      <button key={c.column}
+                        disabled={alreadyAdded}
+                        onClick={() => addDashFilter(c.column)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all border ${
+                          alreadyAdded
+                            ? 'border-green-200 bg-green-50 text-green-600 cursor-default'
+                            : 'border-[#E5E7EB] bg-white text-[#6B7280] hover:border-primary hover:text-primary hover:bg-primary/5 cursor-pointer'
+                        }`}>
+                        {alreadyAdded ? '✓ ' : '+ '}{c.column.replace(/_/g, ' ')}
+                        <span className="text-[8px] ml-1 opacity-60">({c.values.length})</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-[10px] text-[#9CA3AF] mb-3">Agrega widgets con datos para ver columnas filtrables</p>
+            )}
+
+            {/* Active filters */}
+            {dashFilters.length > 0 && (
+              <div className="space-y-2">
+                {dashFilters.map(filter => (
+                  <div key={filter.id} className="border border-[#E5E7EB] rounded-lg p-2.5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-[#374151]">{filter.label}</span>
+                      <div className="flex items-center gap-1">
+                        {filter.selected.length > 0 && (
+                          <button onClick={() => setDashFilters(prev => prev.map(f => f.id === filter.id ? { ...f, selected: [] } : f))}
+                            className="text-[9px] text-primary hover:underline">Limpiar</button>
+                        )}
+                        <button onClick={() => removeDashFilter(filter.id)}
+                          className="p-0.5 hover:bg-red-50 rounded text-[#9CA3AF] hover:text-red-500"><X size={10} /></button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                      {filter.values.map(val => {
+                        const isSelected = filter.selected.includes(val)
+                        return (
+                          <button key={val}
+                            onClick={() => toggleFilterValue(filter.id, val)}
+                            className={`px-2 py-0.5 rounded text-[10px] transition-all border ${
+                              isSelected
+                                ? 'border-primary bg-primary text-white'
+                                : 'border-[#E5E7EB] bg-[#F9FAFB] text-[#6B7280] hover:border-primary/30'
+                            }`}>
+                            {val}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+                <button onClick={applyFilters}
+                  disabled={filterLoading}
+                  className="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5">
+                  {filterLoading ? <Loader2 size={12} className="animate-spin" /> : <Filter size={12} />}
+                  Aplicar filtros
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Active filter chips bar */}
+      {dashFilters.some(f => f.selected.length > 0) && !filterPanelOpen && (
+        <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
+          <Filter size={12} className="text-[#9CA3AF]" />
+          {dashFilters.filter(f => f.selected.length > 0).map(f => (
+            <span key={f.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-medium rounded-lg">
+              {f.label}: {f.selected.length === 1 ? f.selected[0] : `${f.selected.length} valores`}
+              <button onClick={() => { setDashFilters(prev => prev.map(df => df.id === f.id ? { ...df, selected: [] } : df)); applyFilters() }}
+                className="hover:bg-primary/20 rounded p-0.5"><X size={8} /></button>
+            </span>
+          ))}
+          <button onClick={() => setFilterPanelOpen(true)} className="text-[10px] text-primary hover:underline">Editar</button>
         </div>
       )}
 
@@ -658,9 +878,8 @@ export default function DashboardBuilder() {
           )}
 
           {/* Grid */}
-          {widgets.length > 0 && canvasWidth > 0 && (
-            <Responsive
-              width={canvasWidth}
+          {widgets.length > 0 && (
+            <ResponsiveGrid
               layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout, xs: gridLayout }}
               breakpoints={GRID_BREAKPOINTS}
               cols={GRID_COLS}
@@ -671,25 +890,30 @@ export default function DashboardBuilder() {
               containerPadding={GRID_PADDING}
               onLayoutChange={handleLayoutChange}
               draggableCancel=".no-drag"
+              measureBeforeMount
               style={{ minHeight: 400 }}
             >
-              {widgets.map(w => (
+              {widgets.map(w => {
+                const cardSt = getCardStyle(w.card_style)
+                const textColor = w.card_text_color || cardSt.color || '#111827'
+                return (
                 <div key={w.grid_i}>
-                  <div className="bg-white rounded-lg h-full flex flex-col overflow-hidden" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#F3F4F6] flex-shrink-0">
+                  <div className="rounded-lg h-full flex flex-col overflow-hidden" style={{ ...cardSt, ...(w.card_bg_color ? { background: w.card_bg_color, backgroundColor: w.card_bg_color } : {}) }}>
+                    {/* Header — compact when hidden */}
+                    <div className={`flex items-center justify-between px-3 flex-shrink-0 ${w.hide_header ? 'py-0.5 opacity-0 hover:opacity-100 transition-opacity absolute top-0 left-0 right-0 z-10' : 'py-1.5'}`}
+                      style={{ borderBottom: w.hide_header ? 'none' : `1px solid ${textColor === '#FFFFFF' || textColor === '#F9FAFB' ? 'rgba(255,255,255,0.15)' : '#F0F1F5'}` }}>
                       {editingTitle === w.grid_i ? (
                         <input data-title-edit={w.grid_i}
-                          className="no-drag font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent text-[#1F2937]"
-                          style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter' }}
+                          className="no-drag font-semibold border-0 border-b border-primary outline-none flex-1 mr-2 bg-transparent"
+                          style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter', color: textColor }}
                           value={w.custom_title || w.title}
                           onChange={e => updateWidgetField(w.grid_i, 'custom_title', e.target.value)}
                           onBlur={() => setEditingTitle(null)}
                           onKeyDown={e => { if (e.key === 'Enter') setEditingTitle(null) }}
                           autoFocus />
                       ) : (
-                        <span className="font-semibold text-[#1F2937] truncate flex-1 cursor-text"
-                          style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter' }}
+                        <span className="font-semibold truncate flex-1 cursor-text"
+                          style={{ fontSize: w.title_font_size || 13, fontFamily: w.font_family || 'Inter', color: textColor }}
                           onClick={() => startEditTitle(w.grid_i)} title="Clic para editar titulo">
                           {w.custom_title || w.title}
                         </span>
@@ -836,6 +1060,75 @@ export default function DashboardBuilder() {
                                   onChange={e => updateWidgetField(w.grid_i, 'axis_font_size', parseInt(e.target.value) || undefined)} />
                               </div>
                             </div>
+
+                            {/* CARD STYLE PRESETS */}
+                            <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                              <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Estilo de tarjeta</p>
+                              <div className="grid grid-cols-3 gap-1 mb-1.5">
+                                {CARD_STYLE_PRESETS.map(preset => (
+                                  <button key={preset.id}
+                                    onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'card_style', preset.id) }}
+                                    className={`px-1 py-1 rounded text-[9px] text-center transition-all border ${
+                                      (w.card_style || 'default') === preset.id
+                                        ? 'border-primary ring-1 ring-primary/30'
+                                        : 'border-[#E5E7EB] hover:border-primary/30'
+                                    }`}
+                                    style={{
+                                      background: preset.bg.includes('gradient') ? preset.bg : preset.bg,
+                                      color: preset.text,
+                                      ...(preset.accent ? { borderLeft: preset.accent } : {}),
+                                    }}>
+                                    {preset.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* CUSTOM CARD COLORS */}
+                            <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                              <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Colores personalizados</p>
+                              <div className="flex gap-1 mb-1">
+                                <div className="flex-1">
+                                  <label className="text-[8px] text-[#9CA3AF] px-1">Fondo</label>
+                                  <input className="no-drag w-full h-6 rounded cursor-pointer border border-[#E5E7EB]"
+                                    type="color" value={w.card_bg_color || '#FFFFFF'}
+                                    onClick={e => e.stopPropagation()}
+                                    onChange={e => updateWidgetField(w.grid_i, 'card_bg_color', e.target.value)} />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="text-[8px] text-[#9CA3AF] px-1">Texto</label>
+                                  <input className="no-drag w-full h-6 rounded cursor-pointer border border-[#E5E7EB]"
+                                    type="color" value={w.card_text_color || '#111827'}
+                                    onClick={e => e.stopPropagation()}
+                                    onChange={e => updateWidgetField(w.grid_i, 'card_text_color', e.target.value)} />
+                                </div>
+                                {(w.card_bg_color || w.card_text_color) && (
+                                  <button onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'card_bg_color', undefined); updateWidgetField(w.grid_i, 'card_text_color', undefined) }}
+                                    className="self-end px-1 py-0.5 text-[8px] text-red-400 hover:text-red-600">Reset</button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* HIDE HEADER / TEXT ALIGN */}
+                            <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                              <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Opciones</p>
+                              <label className="flex items-center gap-1.5 px-1 mb-1 cursor-pointer" onClick={e => e.stopPropagation()}>
+                                <input type="checkbox" className="no-drag w-3 h-3 rounded border-[#D1D5DB] accent-primary"
+                                  checked={!!w.hide_header}
+                                  onChange={e => updateWidgetField(w.grid_i, 'hide_header', e.target.checked)} />
+                                <span className="text-[10px] text-[#6B7280]">Ocultar encabezado</span>
+                              </label>
+                              <div className="flex gap-1 px-1">
+                                {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]] as const).map(([align, Icon]) => (
+                                  <button key={align}
+                                    onClick={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'text_align', align) }}
+                                    className={`p-1 rounded transition-colors ${(w.text_align || 'left') === align ? 'bg-primary/10 text-primary' : 'text-[#9CA3AF] hover:bg-gray-100'}`}
+                                    title={align}>
+                                    <Icon size={12} />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -844,14 +1137,17 @@ export default function DashboardBuilder() {
                     {/* Content */}
                     <div className="flex-1 overflow-hidden flex flex-col" style={{ minHeight: 0 }}>
                       {w.is_title_block ? (
-                        <div className="no-drag flex items-center justify-center flex-1 px-4">
-                          <input className={`${TEXT_SIZE_CLASS[w.text_size || 'lg']} font-bold text-center w-full bg-transparent border-0 outline-none text-[#1F2937]`}
+                        <div className="no-drag flex items-center justify-center flex-1 px-4"
+                          style={{ textAlign: w.text_align || 'center' }}>
+                          <input className={`${TEXT_SIZE_CLASS[w.text_size || 'lg']} font-bold w-full bg-transparent border-0 outline-none`}
+                            style={{ color: textColor, textAlign: w.text_align || 'center' }}
                             value={w.text_content || ''} onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
                             placeholder="Titulo de seccion..." />
                         </div>
                       ) : w.type === 'text_card' ? (
-                        <div className="no-drag flex-1 flex flex-col gap-1 p-2">
-                          <textarea className={`flex-1 ${TEXT_SIZE_CLASS[w.text_size || 'sm']} bg-transparent border-0 outline-none resize-none text-[#374151]`}
+                        <div className="no-drag flex-1 flex flex-col gap-1 p-2" style={{ textAlign: w.text_align || 'left' }}>
+                          <textarea className={`flex-1 ${TEXT_SIZE_CLASS[w.text_size || 'sm']} bg-transparent border-0 outline-none resize-none`}
+                            style={{ color: textColor }}
                             value={w.text_content || ''} onChange={e => updateWidgetField(w.grid_i, 'text_content', e.target.value)}
                             placeholder="Texto informativo..." />
                           <input className="text-xs text-primary bg-transparent border-0 border-b border-[#E5E7EB] outline-none"
@@ -899,8 +1195,8 @@ export default function DashboardBuilder() {
                     </div>
                   </div>
                 </div>
-              ))}
-            </Responsive>
+              )})}
+            </ResponsiveGrid>
           )}
         </div>
       </div>

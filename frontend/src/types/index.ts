@@ -118,6 +118,14 @@ export interface DashboardWidget {
   group_by_column?: string
   // KPI color
   kpi_color?: string
+  // Card visual style
+  card_style?: string
+  card_bg_color?: string
+  card_text_color?: string
+  hide_header?: boolean
+  text_align?: 'left' | 'center' | 'right'
+  // Original SQL (before granularity filter transforms)
+  original_sql?: string
 }
 
 // Font family options
@@ -352,3 +360,125 @@ export const GRID_TEMPLATES: GridTemplate[] = [
     ],
   },
 ]
+
+// Dashboard-level variable filter
+export interface DashboardFilter {
+  id: string
+  column: string            // column name to filter on (e.g. "agent_id")
+  table?: string            // optional table hint
+  label: string             // display label (e.g. "Agente")
+  values: string[]          // available values (auto-detected from data)
+  selected: string[]        // currently selected values
+}
+
+/**
+ * Detect filterable columns from widgets' data.
+ * Returns columns that appear in multiple widgets or have low cardinality (< 50 unique values).
+ */
+export function detectFilterableColumns(widgets: DashboardWidget[]): { column: string; values: string[]; table?: string }[] {
+  const colMap = new Map<string, Set<string>>()
+  for (const w of widgets) {
+    if (!w.data?.length || !w.columns?.length) continue
+    for (const col of w.columns) {
+      const uniqueVals = new Set(w.data.map(r => String(r[col] ?? '')).filter(v => v !== ''))
+      if (uniqueVals.size > 0 && uniqueVals.size <= 50) {
+        if (!colMap.has(col)) colMap.set(col, new Set())
+        for (const v of uniqueVals) colMap.get(col)!.add(v)
+      }
+    }
+  }
+  return Array.from(colMap.entries())
+    .filter(([, vals]) => vals.size >= 2 && vals.size <= 50)
+    .map(([col, vals]) => ({ column: col, values: Array.from(vals).sort() }))
+}
+
+/**
+ * Apply dashboard filters to a SQL query by appending WHERE/AND clauses.
+ */
+export function applyDashboardFilters(sql: string, filters: DashboardFilter[]): string {
+  if (!sql || !filters.length) return sql
+  const activeFilters = filters.filter(f => f.selected.length > 0 && f.selected.length < f.values.length)
+  if (!activeFilters.length) return sql
+
+  const conditions = activeFilters.map(f => {
+    const escaped = f.selected.map(v => `'${v.replace(/'/g, "''")}'`).join(', ')
+    return `${f.column} IN (${escaped})`
+  })
+
+  // Inject before GROUP BY, ORDER BY, LIMIT, or at end
+  const injectionPoint = sql.search(/\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i)
+  if (injectionPoint > 0) {
+    const before = sql.slice(0, injectionPoint).trimEnd()
+    const after = sql.slice(injectionPoint)
+    const hasWhere = /\bWHERE\b/i.test(before)
+    return `${before} ${hasWhere ? 'AND' : 'WHERE'} ${conditions.join(' AND ')} ${after}`
+  }
+
+  const hasWhere = /\bWHERE\b/i.test(sql)
+  return `${sql} ${hasWhere ? 'AND' : 'WHERE'} ${conditions.join(' AND ')}`
+}
+
+// Card visual style presets
+export interface CardStylePreset {
+  id: string
+  label: string
+  bg: string
+  border: string
+  shadow: string
+  text: string
+  accent?: string
+}
+
+export const CARD_STYLE_PRESETS: CardStylePreset[] = [
+  { id: 'default', label: 'Blanco', bg: '#FFFFFF', border: '1px solid #E8EAF0', shadow: '0 1px 3px rgba(0,0,0,0.04)', text: '#111827' },
+  { id: 'elevated', label: 'Elevado', bg: '#FFFFFF', border: 'none', shadow: '0 8px 24px rgba(0,0,0,0.10)', text: '#111827' },
+  { id: 'flat', label: 'Plano', bg: '#F3F4F6', border: 'none', shadow: 'none', text: '#374151' },
+  { id: 'outlined-blue', label: 'Borde azul', bg: '#FFFFFF', border: '2px solid #1E88E5', shadow: 'none', text: '#111827' },
+  { id: 'outlined-green', label: 'Borde verde', bg: '#FFFFFF', border: '2px solid #76C043', shadow: 'none', text: '#111827' },
+  { id: 'dark', label: 'Oscuro', bg: '#1A1A2E', border: 'none', shadow: '0 4px 16px rgba(0,0,0,0.2)', text: '#F9FAFB' },
+  { id: 'gradient-blue', label: 'Azul grad.', bg: 'linear-gradient(135deg, #1E88E5, #1565C0)', border: 'none', shadow: '0 4px 12px rgba(30,136,229,0.3)', text: '#FFFFFF' },
+  { id: 'gradient-green', label: 'Verde grad.', bg: 'linear-gradient(135deg, #76C043, #2E7D32)', border: 'none', shadow: '0 4px 12px rgba(118,192,67,0.3)', text: '#FFFFFF' },
+  { id: 'gradient-dark', label: 'Oscuro grad.', bg: 'linear-gradient(135deg, #1A1A2E, #2D2D44)', border: 'none', shadow: '0 4px 16px rgba(0,0,0,0.3)', text: '#FFFFFF' },
+  { id: 'gradient-purple', label: 'Morado grad.', bg: 'linear-gradient(135deg, #667eea, #764ba2)', border: 'none', shadow: '0 4px 12px rgba(102,126,234,0.3)', text: '#FFFFFF' },
+  { id: 'accent-left', label: 'Acento izq.', bg: '#FFFFFF', border: 'none', shadow: '0 1px 3px rgba(0,0,0,0.04)', text: '#111827', accent: '4px solid #1E88E5' },
+  { id: 'accent-green', label: 'Acento verde', bg: '#FFFFFF', border: 'none', shadow: '0 1px 3px rgba(0,0,0,0.04)', text: '#111827', accent: '4px solid #76C043' },
+]
+
+// Dashboard-level granularity options
+export type DashboardGranularity = 'original' | 'dia_semana' | 'mes' | 'anio'
+
+export const GRANULARITY_OPTIONS: { value: DashboardGranularity; label: string }[] = [
+  { value: 'original', label: 'Original' },
+  { value: 'dia_semana', label: 'Dia semana' },
+  { value: 'mes', label: 'Mes' },
+  { value: 'anio', label: 'Año' },
+]
+
+export function transformSqlGranularity(sql: string, granularity: DashboardGranularity): string {
+  if (granularity === 'original' || !sql) return sql
+  const pattern = /DATE_TRUNC\s*\(\s*'(?:month|week|day)'\s*,\s*([\s\S]*?)\)(?:::date)?/gi
+  switch (granularity) {
+    case 'dia_semana':
+      return sql.replace(pattern, "TRIM(TO_CHAR($1, 'Day'))")
+    case 'mes':
+      return sql.replace(pattern, "TRIM(TO_CHAR($1, 'Month'))")
+    case 'anio':
+      return sql.replace(pattern, "EXTRACT(YEAR FROM $1)::text")
+    default:
+      return sql
+  }
+}
+
+export function getCardStyle(preset?: string): React.CSSProperties {
+  const p = CARD_STYLE_PRESETS.find(s => s.id === preset) || CARD_STYLE_PRESETS[0]
+  const isGradient = p.bg.includes('gradient')
+  return {
+    background: isGradient ? p.bg : p.bg,
+    backgroundColor: isGradient ? undefined : p.bg,
+    border: p.border,
+    boxShadow: p.shadow,
+    color: p.text,
+    borderRadius: 12,
+    ...(p.accent ? { borderLeft: p.accent } : {}),
+  }
+}
