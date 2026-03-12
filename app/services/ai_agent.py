@@ -235,26 +235,38 @@ El eje central de analisis es la **CONVERSACION**, NO el mensaje individual.
 - nps_surveys.agent_id = agents.agent_id
 - Mensajes con intent NO tienen conversation_id — consultar DIRECTAMENTE en messages sin JOIN
 
-=== COMO CONSTRUIR CONVERSACIONES DESDE MESSAGES ===
+=== COMO CONSTRUIR CONVERSACIONES ===
 
-**A) Conversaciones WhatsApp (bot + agente) — desde messages:**
+**IMPORTANTE sobre el flujo real de Visionamos:**
+1. Usuario escribe por WhatsApp → Bot responde (direction=Bot, SIN conversation_id)
+2. Si el bot no puede resolver → escalamiento → se crea conversation_id y entra un agente
+3. Por eso: mensajes Bot casi NUNCA tienen conversation_id (solo 15 de 4,190)
+4. Las ~4,756 conversaciones con conversation_id son TODAS atendidas por agente (escaladas desde bot)
+5. NO clasificar como "Bot only" vs "Agente only" — es engañoso. TODAS las conv_id son de agente.
+
+**A) Conversaciones con agente — desde messages (con conversation_id):**
 WITH conv AS (
   SELECT m.conversation_id, MIN(m.date) AS fecha, COUNT(*) AS total_msgs,
-    BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human,
-    COUNT(*) FILTER (WHERE m.is_fallback) AS fallbacks
+    COUNT(*) FILTER (WHERE m.direction = 'Agent') AS msgs_agente,
+    COUNT(*) FILTER (WHERE m.direction = 'Inbound') AS msgs_usuario,
+    COUNT(DISTINCT m.agent_id) FILTER (WHERE m.agent_id IS NOT NULL) AS num_agentes
   FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL
   GROUP BY m.conversation_id
 )
-- Bot: has_bot AND NOT has_human | Agente: has_human AND NOT has_bot | Mixta: has_bot AND has_human
+- Metricas utiles: total_msgs, msgs_agente, msgs_usuario, num_agentes, fecha
 
-**B) Contact Center — desde chat_conversations:**
+**B) Interacciones Bot-only (SIN conversation_id):**
+Para contar interacciones que el bot resolvio sin escalar:
+SELECT m.date AS "Fecha", COUNT(DISTINCT m.contact_id) AS "Contactos Bot-only"
+FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.direction = 'Bot' AND m.conversation_id IS NULL
+GROUP BY 1 ORDER BY 1
+
+**C) Contact Center — desde chat_conversations:**
 SELECT DATE_TRUNC('day', cc.queued_at)::date AS "Fecha",
   COUNT(*) AS "Sesiones", COUNT(DISTINCT cc.conversation_session_id) AS "Conv Unicas"
 FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1
 
-**IMPORTANTE para agentes**: La tabla agents NO tiene agent_name. Para identificar agentes usar:
-- cc.agent_email de chat_conversations (email del agente)
-- O simplemente agent_id si no se necesita nombre
+**Para agentes**: La tabla agents NO tiene agent_name. Usar cc.agent_email de chat_conversations.
 
 === INTENCIONES (INTENTS) — REGLAS CRITICAS ===
 - intent existe en mensajes Inbound (~26K). TODOS tienen conversation_id=NULL.
@@ -283,13 +295,13 @@ FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER
 
 === CONSULTAS DE REFERENCIA (CONVERSACION-CENTRICAS) ===
 
--- Conv clasificadas por dia (Bot/Agente/Mixta):
-WITH conv AS (SELECT m.conversation_id, MIN(m.date) AS fecha, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
-SELECT conv.fecha AS "Fecha", CASE WHEN conv.has_bot AND NOT conv.has_human THEN 'Bot' WHEN conv.has_human AND NOT conv.has_bot THEN 'Agente' ELSE 'Mixta' END AS "Tipo", COUNT(*) AS "Conversaciones" FROM conv GROUP BY 1, 2 ORDER BY 1 LIMIT 500
+-- Conversaciones por dia (con agente):
+WITH conv AS (SELECT m.conversation_id, MIN(m.date) AS fecha, COUNT(*) AS msgs FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
+SELECT conv.fecha AS "Fecha", COUNT(*) AS "Conversaciones", ROUND(AVG(conv.msgs)::numeric, 1) AS "Promedio Msgs" FROM conv GROUP BY 1 ORDER BY 1 LIMIT 200
 
 -- KPI conversaciones:
-WITH conv AS (SELECT m.conversation_id, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
-SELECT COUNT(*) AS "Total Conversaciones", COUNT(*) FILTER (WHERE has_bot AND NOT has_human) AS "Solo Bot", COUNT(*) FILTER (WHERE has_human AND NOT has_bot) AS "Solo Agente", COUNT(*) FILTER (WHERE has_bot AND has_human) AS "Escaladas" FROM conv LIMIT 1
+WITH conv AS (SELECT m.conversation_id, COUNT(*) AS msgs, COUNT(DISTINCT m.agent_id) FILTER (WHERE m.agent_id IS NOT NULL) AS agentes FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
+SELECT COUNT(*) AS "Total Conversaciones", ROUND(AVG(msgs)::numeric, 1) AS "Msgs Promedio por Conv", SUM(CASE WHEN agentes > 1 THEN 1 ELSE 0 END) AS "Multi-agente" FROM conv LIMIT 1
 
 -- Agentes por conversaciones (usa agent_email, NO agent_name):
 SELECT cc.agent_email AS "Agente", COUNT(DISTINCT cc.conversation_session_id) AS "Conversaciones" FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' AND cc.agent_email IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
@@ -372,9 +384,10 @@ El eje central de analisis es la **CONVERSACION**, NO el mensaje individual.
 - INTENTS: conversation_id=NULL en TODOS los mensajes con intent. NUNCA usar COUNT(DISTINCT conversation_id) directo (retorna 0). Para vincular intents a conversaciones, usar JOIN via contact_id: WITH ic AS (SELECT contact_id, intent FROM messages WHERE ...), cc AS (SELECT DISTINCT contact_id, conversation_id FROM messages WHERE conversation_id IS NOT NULL) SELECT ic.intent, COUNT(DISTINCT cc.conversation_id) FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1
 - messages.date (DATE) vs chat_conversations.queued_at (TIMESTAMP)
 
-=== COMO CLASIFICAR CONVERSACIONES ===
-WITH conv AS (SELECT m.conversation_id, MIN(m.date) AS fecha, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
-Bot: has_bot AND NOT has_human | Agente: has_human AND NOT has_bot | Mixta: has_bot AND has_human
+=== FLUJO DE CONVERSACIONES ===
+TODAS las conversaciones con conversation_id son atendidas por agente (escaladas desde bot).
+Mensajes Bot casi NUNCA tienen conversation_id (solo 15 de 4,190).
+NO clasificar Bot/Agente/Mixta con is_bot/is_human — es engañoso. Usar metricas de agente.
 
 === REGLAS SQL ===
 - Solo SELECT/WITH. SIEMPRE WHERE alias.tenant_id = '{{TENANT_ID}}' y LIMIT (max 1000)
@@ -382,7 +395,7 @@ Bot: has_bot AND NOT has_human | Agente: has_human AND NOT has_bot | Mixta: has_
 - Alias legibles en espanol. SIEMPRE incluir chart_type adecuado.
 
 === CONSULTAS DE REFERENCIA ===
-Conv por dia: WITH conv AS (SELECT m.conversation_id, MIN(m.date) AS fecha, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id) SELECT conv.fecha AS "Fecha", CASE WHEN conv.has_bot AND NOT conv.has_human THEN 'Bot' WHEN conv.has_human AND NOT conv.has_bot THEN 'Agente' ELSE 'Mixta' END AS "Tipo", COUNT(*) AS "Conversaciones" FROM conv GROUP BY 1, 2 ORDER BY 1 LIMIT 500
+Conv por dia: WITH conv AS (SELECT m.conversation_id, MIN(m.date) AS fecha, COUNT(*) AS msgs FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id) SELECT conv.fecha AS "Fecha", COUNT(*) AS "Conversaciones", ROUND(AVG(conv.msgs)::numeric,1) AS "Msgs Promedio" FROM conv GROUP BY 1 ORDER BY 1 LIMIT 200
 Agentes (usa agent_email, NO agent_name): SELECT cc.agent_email AS "Agente", COUNT(DISTINCT cc.conversation_session_id) AS "Conversaciones" FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' AND cc.agent_email IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 Intenciones por menciones: SELECT m.intent AS "Intencion", COUNT(*) AS "Menciones" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 Intenciones por conv (via contact_id): WITH ic AS (SELECT m.contact_id, m.intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cc AS (SELECT DISTINCT m.contact_id, m.conversation_id FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT ic.intent AS "Intencion", COUNT(DISTINCT cc.conversation_id) AS "Conversaciones" FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1 ORDER BY 2 DESC LIMIT 15
