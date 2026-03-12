@@ -256,9 +256,12 @@ FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER
 - cc.agent_email de chat_conversations (email del agente)
 - O simplemente agent_id si no se necesita nombre
 
-=== INTENCIONES (INTENTS) — EXCEPCION AL EJE CONVERSACION ===
-- intent esta en mensajes Inbound (~26K), con conversation_id=NULL.
-- Consultar DIRECTAMENTE en messages sin JOIN.
+=== INTENCIONES (INTENTS) — REGLAS CRITICAS ===
+- intent existe en mensajes Inbound (~26K). TODOS tienen conversation_id=NULL.
+- NUNCA usar COUNT(DISTINCT m.conversation_id) directo con intents — retorna 0.
+- Para "intenciones por menciones": COUNT(*) directo en messages.
+- Para "intenciones por conversacion": vincular via contact_id con esta CTE:
+  WITH ic AS (SELECT m.contact_id, m.intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cc AS (SELECT DISTINCT m.contact_id, m.conversation_id FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT ic.intent AS "Intencion", COUNT(DISTINCT cc.conversation_id) AS "Conversaciones" FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
 === TIPO DE GRAFICA (chart_type) ===
 - "line" — datos temporales/tendencias
@@ -299,8 +302,11 @@ SELECT conv.contact_name AS "Contacto", COUNT(*) AS "Conversaciones" FROM conv G
 WITH conv AS (SELECT m.conversation_id, MIN(m.date) AS fecha FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id)
 SELECT DATE_TRUNC('month', conv.fecha)::date AS "Mes", COUNT(*) AS "Conversaciones" FROM conv GROUP BY 1 ORDER BY 1 LIMIT 24
 
--- Intenciones top (nivel mensaje, NO conversacion):
-SELECT m.intent AS "Intencion", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+-- Intenciones top por menciones:
+SELECT m.intent AS "Intencion", COUNT(*) AS "Menciones" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+
+-- Intenciones top por conversaciones (vincula via contact_id):
+WITH ic AS (SELECT m.contact_id, m.intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cc AS (SELECT DISTINCT m.contact_id, m.conversation_id FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT ic.intent AS "Intencion", COUNT(DISTINCT cc.conversation_id) AS "Conversaciones" FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 
 -- Intenciones con fallback:
 SELECT m.intent AS "Intencion", COUNT(*) AS "Fallbacks" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.is_fallback = true AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
@@ -363,7 +369,7 @@ El eje central de analisis es la **CONVERSACION**, NO el mensaje individual.
 === RELACIONES ===
 - messages.conversation_id = chat_conversations.session_id (SOLO con agente)
 - nps_surveys.conversation_id = chat_conversations.session_id
-- Intents (Inbound) NO tienen conversation_id → consultar directo en messages
+- INTENTS: conversation_id=NULL en TODOS los mensajes con intent. NUNCA usar COUNT(DISTINCT conversation_id) directo (retorna 0). Para vincular intents a conversaciones, usar JOIN via contact_id: WITH ic AS (SELECT contact_id, intent FROM messages WHERE ...), cc AS (SELECT DISTINCT contact_id, conversation_id FROM messages WHERE conversation_id IS NOT NULL) SELECT ic.intent, COUNT(DISTINCT cc.conversation_id) FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1
 - messages.date (DATE) vs chat_conversations.queued_at (TIMESTAMP)
 
 === COMO CLASIFICAR CONVERSACIONES ===
@@ -378,7 +384,8 @@ Bot: has_bot AND NOT has_human | Agente: has_human AND NOT has_bot | Mixta: has_
 === CONSULTAS DE REFERENCIA ===
 Conv por dia: WITH conv AS (SELECT m.conversation_id, MIN(m.date) AS fecha, BOOL_OR(m.is_bot) AS has_bot, BOOL_OR(m.is_human) AS has_human FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL GROUP BY m.conversation_id) SELECT conv.fecha AS "Fecha", CASE WHEN conv.has_bot AND NOT conv.has_human THEN 'Bot' WHEN conv.has_human AND NOT conv.has_bot THEN 'Agente' ELSE 'Mixta' END AS "Tipo", COUNT(*) AS "Conversaciones" FROM conv GROUP BY 1, 2 ORDER BY 1 LIMIT 500
 Agentes (usa agent_email, NO agent_name): SELECT cc.agent_email AS "Agente", COUNT(DISTINCT cc.conversation_session_id) AS "Conversaciones" FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' AND cc.agent_email IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
-Intenciones: SELECT m.intent AS "Intencion", COUNT(*) AS "Mensajes" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+Intenciones por menciones: SELECT m.intent AS "Intencion", COUNT(*) AS "Menciones" FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+Intenciones por conv (via contact_id): WITH ic AS (SELECT m.contact_id, m.intent FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.intent IS NOT NULL AND m.intent != ''), cc AS (SELECT DISTINCT m.contact_id, m.conversation_id FROM messages m WHERE m.tenant_id = '{{TENANT_ID}}' AND m.conversation_id IS NOT NULL) SELECT ic.intent AS "Intencion", COUNT(DISTINCT cc.conversation_id) AS "Conversaciones" FROM ic JOIN cc ON cc.contact_id = ic.contact_id GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 CC tiempos (usa wait_time_seconds, assigned_at): SELECT DATE_TRUNC('day', cc.queued_at)::date AS "Fecha", ROUND(AVG(cc.wait_time_seconds)::numeric, 0) AS "Espera (s)", ROUND(AVG(cc.handle_time_seconds)::numeric, 0) AS "Atencion (s)" FROM chat_conversations cc WHERE cc.tenant_id = '{{TENANT_ID}}' AND cc.assigned_at IS NOT NULL GROUP BY 1 ORDER BY 1 LIMIT 100
 Toques (columnas reales): SELECT td.canal AS "Canal", SUM(td.enviados) AS "Enviados", SUM(td.entregados) AS "Entregados" FROM toques_daily td WHERE td.tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 2 DESC LIMIT 10
 SMS: SELECT sd.date AS "Fecha", sd.total_sent AS "Enviados", sd.total_delivered AS "Entregados" FROM sms_daily_stats sd WHERE sd.tenant_id = '{{TENANT_ID}}' ORDER BY 1 LIMIT 100
