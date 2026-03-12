@@ -632,19 +632,23 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
 
         sql = raw_sql.strip().rstrip(";")
 
-        # 1. Must be a SELECT
-        if not sql.upper().startswith("SELECT"):
+        # 1. Must be a SELECT (or WITH ... SELECT CTE)
+        sql_upper = sql.upper().lstrip()
+        if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
             return self._sql_error("Solo se permiten consultas SELECT.")
 
         # 2. Keyword blocklist
         if SQL_BLOCKLIST.search(sql):
             return self._sql_error("La consulta contiene operaciones no permitidas.")
 
-        # 3. Only allowed tables
+        # 3. Only allowed tables (exclude CTE aliases)
+        cte_pattern = re.compile(r"\b(\w+)\s+AS\s*\(", re.IGNORECASE)
+        cte_names = {m.lower() for m in cte_pattern.findall(sql)}
         table_pattern = re.compile(
             r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_.]*)", re.IGNORECASE
         )
         referenced_tables = {m.lower() for m in table_pattern.findall(sql)}
+        referenced_tables -= cte_names  # CTE aliases are not real tables
         disallowed = referenced_tables - ALLOWED_TABLES
         if disallowed:
             return self._sql_error(

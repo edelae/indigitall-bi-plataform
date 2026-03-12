@@ -79,7 +79,8 @@ async def execute_sql(req: SqlRequest):
         raise HTTPException(400, "SQL vacio")
     if SQL_BLOCKLIST.search(sql):
         raise HTTPException(400, "SQL contiene operaciones no permitidas (solo SELECT)")
-    if not sql.upper().lstrip().startswith("SELECT"):
+    sql_upper = sql.upper().lstrip()
+    if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
         raise HTTPException(400, "Solo se permiten consultas SELECT")
 
     try:
