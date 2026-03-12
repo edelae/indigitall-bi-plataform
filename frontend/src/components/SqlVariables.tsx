@@ -44,6 +44,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
 
 export default function SqlVariables({ sql, lastResult, onResultUpdate }: Props) {
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [expandedTable, setExpandedTable] = useState<string | null>(null)
 
   // Detect DATE_TRUNC granularity
@@ -73,6 +74,7 @@ export default function SqlVariables({ sql, lastResult, onResultUpdate }: Props)
 
   const executeNewSql = async (newSql: string) => {
     setLoading(true)
+    setError(null)
     try {
       const res = await executeSql(newSql)
       onResultUpdate({
@@ -82,7 +84,7 @@ export default function SqlVariables({ sql, lastResult, onResultUpdate }: Props)
         query_details: { ...lastResult.query_details, sql: newSql },
       })
     } catch (err: any) {
-      alert('Error: ' + (err.message || 'Error desconocido'))
+      setError(err.message || 'Error desconocido')
     } finally {
       setLoading(false)
     }
@@ -123,6 +125,13 @@ export default function SqlVariables({ sql, lastResult, onResultUpdate }: Props)
       {loading && (
         <div className="flex items-center gap-1.5 text-xs text-primary">
           <Loader2 size={12} className="animate-spin" /> Ejecutando...
+        </div>
+      )}
+
+      {error && (
+        <div className="text-[10px] px-2 py-1.5 rounded bg-red-50 text-red-600 border border-red-200">
+          {error}
+          <button onClick={() => setError(null)} className="ml-1 font-bold hover:text-red-800">&times;</button>
         </div>
       )}
 

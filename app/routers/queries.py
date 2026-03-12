@@ -20,6 +20,7 @@ class SaveQueryRequest(BaseModel):
     ai_function: Optional[str] = None
     generated_sql: Optional[str] = None
     chart_type: Optional[str] = "table"
+    chart_config: Optional[Dict[str, Any]] = None
     conversation_history: Optional[List[Dict[str, Any]]] = None
     tenant: Optional[str] = None
 
@@ -69,7 +70,11 @@ async def save_query(req: SaveQueryRequest):
         data=df,
         ai_function=req.ai_function,
         generated_sql=req.generated_sql,
-        visualizations=[{"type": req.chart_type or "table", "is_default": True}],
+        visualizations=[{
+            "type": req.chart_type or "table",
+            "is_default": True,
+            **(req.chart_config or {}),
+        }],
         conversation_history=req.conversation_history,
     )
     return result

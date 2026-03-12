@@ -59,6 +59,7 @@ export async function saveQuery(data: {
   ai_function?: string | null
   generated_sql?: string | null
   chart_type?: string | null
+  chart_config?: Record<string, any> | null
   conversation_history?: ChatMessage[]
   tenant?: string
 }): Promise<{ success: boolean; id: number }> {

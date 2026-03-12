@@ -95,8 +95,12 @@ export default function Layout() {
         </div>
       </nav>
 
-      {/* Content */}
-      <main className="max-w-[1400px] mx-auto px-6 py-6">
+      {/* Content — full-width for dashboard builder & view */}
+      <main className={`mx-auto py-6 ${
+        location.pathname.startsWith('/tableros/saved/') || location.pathname === '/tableros/nuevo'
+          ? 'px-4'
+          : 'max-w-[1400px] px-6'
+      }`}>
         <Outlet />
       </main>
     </div>

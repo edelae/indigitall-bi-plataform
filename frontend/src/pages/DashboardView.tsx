@@ -382,7 +382,7 @@ export default function DashboardView() {
                               <KpiCard
                                 label={w.kpi_label || w.title}
                                 value={getKpiValue(w)}
-                                color={PRIMARY_COLOR}
+                                color={w.kpi_color || PRIMARY_COLOR}
                                 delta={w.kpi_delta}
                                 kpiStyle={w.kpi_style || 'accent'}
                                 maxValue={w.kpi_max_value}
@@ -407,6 +407,9 @@ export default function DashboardView() {
                                   fontFamily={w.font_family}
                                   axisFontSize={w.axis_font_size}
                                   legendFontSize={w.legend_font_size}
+                                  xColumn={w.x_column}
+                                  yColumns={w.y_columns}
+                                  groupByColumn={w.group_by_column}
                                 />
                               </div>
                             </div>

@@ -72,10 +72,28 @@ export default function QueryChat() {
 
         if (restoredResult) {
           setLastResult(restoredResult)
+          const viz = query.visualizations?.[0] || {}
+          const restoredChartType = (chartType && chartType !== 'table' ? chartType : 'bar') as ChartType
           if (chartType && chartType !== 'table') {
-            setSelectedChart(chartType as ChartType)
-            setChartConfig(prev => ({ ...prev, chartType: chartType as ChartType }))
+            setSelectedChart(restoredChartType)
           }
+          // Restore full chart config from saved visualization
+          setChartConfig({
+            chartType: restoredChartType,
+            colorPalette: viz.colorPalette,
+            xLabel: viz.xLabel,
+            yLabel: viz.yLabel,
+            showLegend: viz.showLegend,
+            fontFamily: viz.fontFamily,
+            axisFontSize: viz.axisFontSize,
+            legendFontSize: viz.legendFontSize,
+            xColumn: viz.xColumn,
+            yColumns: viz.yColumns,
+            groupByColumn: viz.groupByColumn,
+            kpiStyle: viz.kpiStyle,
+            kpiColor: viz.kpiColor,
+            kpiMaxValue: viz.kpiMaxValue,
+          })
           setActiveTab('chart')
         }
 
@@ -145,6 +163,21 @@ export default function QueryChat() {
         ai_function: lastResult.query_details?.function || null,
         generated_sql: lastResult.query_details?.sql || null,
         chart_type: chartConfig.chartType,
+        chart_config: {
+          colorPalette: chartConfig.colorPalette,
+          xLabel: chartConfig.xLabel,
+          yLabel: chartConfig.yLabel,
+          showLegend: chartConfig.showLegend,
+          fontFamily: chartConfig.fontFamily,
+          axisFontSize: chartConfig.axisFontSize,
+          legendFontSize: chartConfig.legendFontSize,
+          xColumn: chartConfig.xColumn,
+          yColumns: chartConfig.yColumns,
+          groupByColumn: chartConfig.groupByColumn,
+          kpiStyle: chartConfig.kpiStyle,
+          kpiColor: chartConfig.kpiColor,
+          kpiMaxValue: chartConfig.kpiMaxValue,
+        },
         conversation_history: messages,
       })
       setSaved(true)

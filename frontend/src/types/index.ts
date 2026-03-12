@@ -26,7 +26,23 @@ export interface SavedQuery {
   result_row_count: number
   result_data: Record<string, any>[]
   result_columns: { name: string; type: string }[]
-  visualizations: { type: string; is_default?: boolean }[]
+  visualizations: {
+    type: string
+    is_default?: boolean
+    colorPalette?: string
+    xLabel?: string
+    yLabel?: string
+    showLegend?: boolean
+    fontFamily?: string
+    axisFontSize?: number
+    legendFontSize?: number
+    xColumn?: string
+    yColumns?: string[]
+    groupByColumn?: string
+    kpiStyle?: 'minimal' | 'accent' | 'progress'
+    kpiColor?: string
+    kpiMaxValue?: number
+  }[]
   generated_sql: string | null
   tags: string[] | null
   is_favorite: boolean
@@ -96,6 +112,12 @@ export interface DashboardWidget {
   // Sub-tab assignment (Prompt 5)
   sub_tab_id?: string
   sub_tab_name?: string
+  // Column assignment (carried from query personalization)
+  x_column?: string
+  y_columns?: string[]
+  group_by_column?: string
+  // KPI color
+  kpi_color?: string
 }
 
 // Font family options

@@ -202,7 +202,8 @@ export default function DashboardBuilder() {
   const addQueryWidgetAt = async (queryId: number, x: number, y: number, w: number, h: number) => {
     try {
       const q = await getQuery(queryId)
-      const chartType = q.visualizations?.[0]?.type || 'bar'
+      const viz = q.visualizations?.[0] || {} as Record<string, any>
+      const chartType = viz.type || 'bar'
       const isKpi = chartType === 'kpi'
       const newWidget: DashboardWidget = {
         query_id: q.id,
@@ -214,9 +215,23 @@ export default function DashboardBuilder() {
         sql: q.generated_sql || '', query_text: q.query_text || '',
         grid_i: `widget-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         grid_x: x, grid_y: y, grid_w: w, grid_h: h,
+        // Carry over chart personalization from saved query
+        color_palette: viz.colorPalette,
+        custom_x_label: viz.xLabel,
+        custom_y_label: viz.yLabel,
+        show_legend: viz.showLegend,
+        font_family: viz.fontFamily,
+        axis_font_size: viz.axisFontSize,
+        legend_font_size: viz.legendFontSize,
+        x_column: viz.xColumn,
+        y_columns: viz.yColumns,
+        group_by_column: viz.groupByColumn,
         ...(isKpi && q.result_data?.[0] ? {
           kpi_value: q.result_data[0][(q.result_columns || [])[1]?.name] || q.result_data[0][(q.result_columns || [])[0]?.name],
           kpi_label: q.name.slice(0, 40),
+          kpi_style: viz.kpiStyle,
+          kpi_color: viz.kpiColor,
+          kpi_max_value: viz.kpiMaxValue,
         } : {}),
       }
       setWidgets(prev => [...prev, newWidget])
@@ -845,7 +860,7 @@ export default function DashboardBuilder() {
                         </div>
                       ) : w.type === 'kpi' && w.kpi_value !== undefined ? (
                         <div className="flex-1 flex items-center justify-center">
-                          <KpiCard label={w.kpi_label || w.title} value={w.kpi_value} color={PRIMARY_COLOR}
+                          <KpiCard label={w.kpi_label || w.title} value={w.kpi_value} color={w.kpi_color || PRIMARY_COLOR}
                             delta={w.kpi_delta} kpiStyle={w.kpi_style || 'accent'} maxValue={w.kpi_max_value} />
                         </div>
                       ) : w.data?.length && w.columns?.length >= 2 ? (
@@ -858,7 +873,9 @@ export default function DashboardBuilder() {
                               xLabel={w.custom_x_label} yLabel={w.custom_y_label}
                               showLegend={w.show_legend !== false}
                               fontFamily={w.font_family} axisFontSize={w.axis_font_size}
-                              legendFontSize={w.legend_font_size} />
+                              legendFontSize={w.legend_font_size}
+                              xColumn={w.x_column} yColumns={w.y_columns}
+                              groupByColumn={w.group_by_column} />
                           </div>
                         </div>
                       ) : w.data?.length ? (
