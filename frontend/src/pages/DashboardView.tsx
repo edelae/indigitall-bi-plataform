@@ -9,6 +9,7 @@ import type { Dashboard, DashboardWidget, ChartType } from '../types'
 import { PRIMARY_COLOR, COLOR_PALETTES } from '../types'
 import { getDashboard } from '../api/client'
 import 'react-grid-layout/css/styles.css'
+import 'react-resizable/css/styles.css'
 
 // Grid constants — IDENTICAL to DashboardBuilder
 const GRID_COLS = { lg: 12, md: 10, sm: 6, xs: 4 }
@@ -17,23 +18,25 @@ const GRID_ROW_HEIGHT = 80
 const GRID_MARGIN: [number, number] = [8, 8]
 const GRID_PADDING: [number, number] = [8, 8]
 
-// Hook: measure container width via ResizeObserver (with rAF fallback)
-// Identical to DashboardBuilder's hook for consistent sizing
+// Hook: measure container width (ResizeObserver + rAF fallback + window fallback)
 function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number {
-  const [width, setWidth] = useState(0)
+  const [width, setWidth] = useState(() => {
+    // Initial fallback: use window width minus sidebar/padding
+    return typeof window !== 'undefined' ? Math.max(window.innerWidth - 120, 400) : 1000
+  })
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    const update = (w: number) => { if (w > 0) setWidth(w) }
     const ro = new ResizeObserver(entries => {
-      for (const entry of entries) setWidth(entry.contentRect.width)
+      for (const entry of entries) update(entry.contentRect.width)
     })
     ro.observe(el)
-    setWidth(el.getBoundingClientRect().width)
-    // Fallback: re-measure after layout paint in case initial width was 0
-    requestAnimationFrame(() => {
-      const w = el.getBoundingClientRect().width
-      if (w > 0) setWidth(w)
-    })
+    update(el.getBoundingClientRect().width)
+    // Fallback: re-measure after layout paint
+    requestAnimationFrame(() => update(el.getBoundingClientRect().width))
+    // Double fallback: another rAF after one frame
+    requestAnimationFrame(() => requestAnimationFrame(() => update(el.getBoundingClientRect().width)))
     return () => ro.disconnect()
   }, [ref])
   return width
@@ -104,7 +107,7 @@ export default function DashboardView() {
             if (!tabMap.has(tid)) tabMap.set(tid, { id: tid, name: tname, widgets: [] })
             tabMap.get(tid)!.widgets.push({
               ...w,
-              grid_i: w.grid_i || `widget-${Math.random().toString(36).slice(2)}`,
+              grid_i: w.grid_i || `w-${tabMap.get(tid)!.widgets.length}`,
               grid_x: w.grid_x ?? 0,
               grid_y: w.grid_y ?? 0,
               grid_w: w.grid_w ?? w.width ?? 6,
@@ -141,18 +144,15 @@ export default function DashboardView() {
     const allWidgets = tabs.flatMap(t => t.widgets)
     for (const w of allWidgets) {
       const label = w.custom_title || w.title
-      if (w.type === 'kpi' && w.kpi_value !== undefined) {
+      if ((w.type === 'kpi' || w.chart_type === 'kpi') && w.kpi_value !== undefined) {
         kpis[label] = w.kpi_value
       } else if (w.data && w.data.length > 0 && w.columns && w.columns.length >= 1) {
-        // Summarize chart data: total rows + first column values
         if (w.data.length === 1) {
-          // Single-row result: include all column values
           for (const col of w.columns) {
             kpis[`${label} — ${col}`] = w.data[0][col]
           }
         } else {
           kpis[`${label} (filas)`] = w.data.length
-          // Include top 5 values for the main Y column
           if (w.columns.length >= 2) {
             const xCol = w.columns[0]
             const yCol = w.columns[1]
@@ -208,6 +208,22 @@ export default function DashboardView() {
 
   const isClickable = (widget: DashboardWidget) => {
     return !!(widget.query_id || widget.query_text || widget.sql)
+  }
+
+  // Determine if a widget should render as KPI
+  const isKpiWidget = (w: DashboardWidget) => {
+    if ((w.type === 'kpi' || w.chart_type === 'kpi') && w.kpi_value !== undefined) return true
+    // Auto-detect: single-row result with 1 column and no chart_type
+    if (w.data?.length === 1 && w.columns?.length === 1 && !w.chart_type) return true
+    return false
+  }
+
+  const getKpiValue = (w: DashboardWidget) => {
+    if (w.kpi_value !== undefined) return w.kpi_value
+    if (w.data?.length === 1 && w.columns?.length >= 1) {
+      return w.data[0][w.columns[w.columns.length > 1 ? 1 : 0]]
+    }
+    return '—'
   }
 
   return (
@@ -270,7 +286,7 @@ export default function DashboardView() {
               <Pencil size={14} /> Editar tablero
             </Link>
           </div>
-        ) : canvasWidth > 0 ? (
+        ) : (
           <Responsive
             width={canvasWidth}
             layouts={{ lg: gridLayout, md: gridLayout, sm: gridLayout, xs: gridLayout }}
@@ -349,11 +365,11 @@ export default function DashboardView() {
                           title={isClickable(w) ? 'Clic para ir a la consulta' : undefined}
                           style={{ minHeight: 0 }}
                         >
-                          {w.type === 'kpi' && w.kpi_value !== undefined ? (
+                          {isKpiWidget(w) ? (
                             <div className="flex-1 flex items-center justify-center">
                               <KpiCard
                                 label={w.kpi_label || w.title}
-                                value={w.kpi_value}
+                                value={getKpiValue(w)}
                                 color={PRIMARY_COLOR}
                                 delta={w.kpi_delta}
                                 kpiStyle={w.kpi_style || 'accent'}
@@ -362,7 +378,7 @@ export default function DashboardView() {
                             </div>
                           ) : w.data && w.data.length > 0 && w.columns && w.columns.length >= 2 ? (
                             <div className="flex-1" style={{ position: 'relative', minHeight: 0 }}>
-                              <div style={{ position: 'absolute', inset: 6 }}>
+                              <div style={{ position: 'absolute', inset: 4 }}>
                                 <ChartWidget
                                   data={w.data}
                                   columns={w.columns}
@@ -426,7 +442,7 @@ export default function DashboardView() {
               </div>
             ))}
           </Responsive>
-        ) : null}
+        )}
       </div>
 
       {/* AI Analyst Panel — with real dashboard data */}
