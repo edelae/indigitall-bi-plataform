@@ -1013,6 +1013,61 @@ export default function DashboardBuilder() {
                               </div>
                             )}
 
+                            {/* COLUMN ASSIGNMENT — Power BI style */}
+                            {w.data?.length > 0 && w.columns?.length >= 2 && !w.is_title_block && w.type !== 'text_card' && (
+                              <div className="border-t border-[#E5E7EB] mt-1.5 pt-1.5">
+                                <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Columnas</p>
+
+                                {/* X Axis */}
+                                <label className="text-[8px] text-[#9CA3AF] px-1">Eje X</label>
+                                <select className="no-drag w-full text-[10px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary bg-white"
+                                  value={w.x_column || w.columns[0]}
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => { e.stopPropagation(); updateWidgetField(w.grid_i, 'x_column', e.target.value) }}>
+                                  {w.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+
+                                {/* Y Values */}
+                                <label className="text-[8px] text-[#9CA3AF] px-1">Valores (Y)</label>
+                                <div className="max-h-20 overflow-y-auto rounded mb-1 p-1 border border-[#E5E7EB]" onClick={e => e.stopPropagation()}>
+                                  {w.columns.filter(c => c !== (w.x_column || w.columns[0]) && c !== w.group_by_column).map(col => (
+                                    <label key={col} className="flex items-center gap-1 py-0.5 px-1 text-[10px] cursor-pointer hover:bg-gray-50 rounded">
+                                      <input type="checkbox" className="no-drag w-3 h-3 rounded"
+                                        checked={(w.y_columns || w.columns.slice(1)).includes(col)}
+                                        onChange={() => {
+                                          const current = w.y_columns || w.columns.slice(1)
+                                          const next = current.includes(col) ? current.filter(c => c !== col) : [...current, col]
+                                          if (next.length > 0) updateWidgetField(w.grid_i, 'y_columns', next)
+                                        }} />
+                                      {col}
+                                    </label>
+                                  ))}
+                                </div>
+
+                                {/* Group By / Legend */}
+                                <label className="text-[8px] text-[#9CA3AF] px-1">Leyenda / Agrupar</label>
+                                <select className="no-drag w-full text-[10px] px-2 py-1 border border-[#E5E7EB] rounded mb-1 outline-none focus:border-primary bg-white"
+                                  value={w.group_by_column || ''}
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => {
+                                    e.stopPropagation()
+                                    const val = e.target.value || undefined
+                                    updateWidgetField(w.grid_i, 'group_by_column', val)
+                                    // Auto-adjust y_columns when group_by changes
+                                    if (val) {
+                                      const xCol = w.x_column || w.columns[0]
+                                      const newY = w.columns.filter(c => c !== xCol && c !== val)
+                                      if (newY.length > 0) updateWidgetField(w.grid_i, 'y_columns', newY.slice(0, 1))
+                                    }
+                                  }}>
+                                  <option value="">Ninguna</option>
+                                  {w.columns.filter(c => c !== (w.x_column || w.columns[0])).map(c => (
+                                    <option key={c} value={c}>{c}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
                             {(w.is_title_block || w.type === 'text_card') && (
                               <>
                                 <p className="text-[9px] text-[#9CA3AF] uppercase tracking-wider px-1 mb-1">Tamaño de texto</p>
