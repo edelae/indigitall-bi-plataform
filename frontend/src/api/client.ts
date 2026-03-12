@@ -77,7 +77,7 @@ export async function archiveQuery(id: number): Promise<{ success: boolean }> {
 }
 
 export async function executeSql(sql: string): Promise<{ data: Record<string, any>[]; columns: string[]; row_count: number }> {
-  return request('/execute-sql', {
+  return request('/ai/execute-sql', {
     method: 'POST',
     body: JSON.stringify({ sql }),
   })
