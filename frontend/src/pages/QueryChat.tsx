@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Send, Download, Bookmark, BarChart3, Loader2, Code, Sparkles, Database,
-  Table2, Settings2, Play, Pencil, Calendar,
+  Table2, Settings2, Play, Pencil,
 } from 'lucide-react'
 import ChatMessage from '../components/ChatMessage'
 import ChartWidget from '../components/ChartWidget'
@@ -43,8 +43,6 @@ export default function QueryChat() {
   const [editingSql, setEditingSql] = useState(false)
   const [sqlText, setSqlText] = useState('')
   const [sqlRunning, setSqlRunning] = useState(false)
-  const [granularity, setGranularity] = useState<'month' | 'week' | 'day'>('month')
-  const [granularityLoading, setGranularityLoading] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Load tables for source panel
@@ -177,41 +175,10 @@ export default function QueryChat() {
     }
   }
 
-  // Temporal granularity: detect DATE_TRUNC in SQL and allow switching
-  const currentSql = lastResult?.query_details?.sql || ''
-  const hasDateTrunc = /DATE_TRUNC\s*\(\s*'(month|week|day)'/i.test(currentSql)
-
-  const handleGranularityChange = async (newGran: 'month' | 'week' | 'day') => {
-    if (newGran === granularity || !currentSql) return
-    setGranularity(newGran)
-    setGranularityLoading(true)
-    try {
-      const newSql = currentSql.replace(
-        /DATE_TRUNC\s*\(\s*'(month|week|day)'/gi,
-        `DATE_TRUNC('${newGran}'`
-      )
-      const res = await executeSql(newSql)
-      setLastResult({
-        ...lastResult!,
-        data: res.data,
-        columns: res.columns,
-        query_details: { ...lastResult!.query_details, sql: newSql },
-      })
-    } catch (err: any) {
-      alert('Error al cambiar granularidad: ' + (err.message || 'Error desconocido'))
-    } finally {
-      setGranularityLoading(false)
-    }
-  }
-
-  // Sync granularity state when SQL changes
-  useEffect(() => {
-    const match = currentSql.match(/DATE_TRUNC\s*\(\s*'(month|week|day)'/i)
-    if (match) {
-      const detected = match[1] as 'month' | 'week' | 'day'
-      setGranularity(detected)
-    }
-  }, [currentSql])
+  // Callback for SqlVariables to update result when SQL is modified
+  const handleResultUpdate = useCallback((newResult: QueryResult) => {
+    setLastResult(newResult)
+  }, [])
 
   const hasData = !!lastResult?.data?.length && lastResult.columns.length >= 2
   const isKpi = lastResult?.chart_type === 'kpi' || selectedChart === 'kpi'
@@ -382,33 +349,6 @@ export default function QueryChat() {
                         })}
                       </div>
                     )}
-                  </div>
-                )}
-
-                {/* Temporal Granularity Selector */}
-                {hasDateTrunc && hasData && !isKpi && (
-                  <div className="flex items-center gap-2 mb-3 px-1">
-                    <Calendar size={14} className="text-primary" />
-                    <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Granularidad:</span>
-                    {([['month', 'Mes'], ['week', 'Semana'], ['day', 'Dia']] as const).map(([val, label]) => (
-                      <button
-                        key={val}
-                        onClick={() => handleGranularityChange(val)}
-                        disabled={granularityLoading}
-                        className={`text-xs px-3 py-1 rounded-pill transition-colors ${
-                          granularity === val
-                            ? 'bg-primary text-white font-semibold'
-                            : 'hover:bg-surface'
-                        }`}
-                        style={granularity !== val ? {
-                          border: '1px solid var(--border)',
-                          color: 'var(--text-muted)',
-                        } : {}}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    {granularityLoading && <Loader2 size={14} className="animate-spin text-primary ml-1" />}
                   </div>
                 )}
 
@@ -617,6 +557,9 @@ export default function QueryChat() {
           onChange={handleConfigChange}
           onClose={() => setShowCustomizer(false)}
           availableColumns={lastResult?.columns}
+          sql={lastResult?.query_details?.sql}
+          lastResult={lastResult}
+          onResultUpdate={handleResultUpdate}
         />
       )}
     </div>

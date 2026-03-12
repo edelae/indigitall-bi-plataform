@@ -1,7 +1,7 @@
 """
-AI Agent Service — Hybrid architecture: pre-built functions + guarded SQL fallback.
-Uses OpenAI GPT-4o with function calling (primary) and Anthropic Claude (fallback).
-Falls back to keyword matching (demo mode) when no API key is configured.
+AI Agent Service — SQL-only architecture.
+Uses OpenAI GPT-4o (primary) and Anthropic Claude (fallback).
+ALL data queries generate SQL. No pre-built functions.
 """
 
 import json
@@ -18,14 +18,12 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Try to import anthropic, allow demo mode without it
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
-# Try to import openai, allow fallback without it
 try:
     import openai
     OPENAI_AVAILABLE = True
@@ -35,16 +33,13 @@ except ImportError:
 # --- SQL Guardrails ---
 
 ALLOWED_TABLES = frozenset({
-    # Core tables (public schema)
     "messages", "contacts", "agents", "daily_stats",
     "toques_daily", "campaigns", "toques_heatmap", "toques_usuario",
     "chat_conversations", "chat_channels", "chat_topics",
     "nps_surveys", "sms_envios", "sms_daily_stats",
-    # dbt marts (public_marts schema)
     "dim_campaigns", "dim_contacts",
     "fct_agent_performance", "fct_daily_stats",
     "fct_messages_daily", "fct_toques_metrics",
-    # Schema-qualified names
     "public_marts.dim_campaigns", "public_marts.dim_contacts",
     "public_marts.fct_agent_performance", "public_marts.fct_daily_stats",
     "public_marts.fct_messages_daily", "public_marts.fct_toques_metrics",
@@ -57,62 +52,32 @@ SQL_BLOCKLIST = re.compile(
 )
 
 MAX_SQL_ROWS = 1000
-SQL_TIMEOUT_MS = 10_000  # 10 seconds
+SQL_TIMEOUT_MS = 10_000
 
-# --- OpenAI Function Calling Tools ---
-
-ANALYTICS_FUNCTIONS = [
-    "summary", "fallback_rate", "messages_by_direction", "messages_by_hour",
-    "messages_over_time", "messages_by_day_of_week", "top_contacts",
-    "intent_distribution", "agent_performance", "entity_comparison",
-    "high_messages_day", "high_messages_week", "high_messages_month",
-]
+# --- OpenAI Tools (SQL only) ---
 
 OPENAI_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "execute_analytics",
-            "description": (
-                "Execute a pre-built analytics function. Use this for common queries "
-                "like summaries, fallback rates, message trends, top contacts, agent performance, etc."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "function_name": {
-                        "type": "string",
-                        "enum": ANALYTICS_FUNCTIONS,
-                        "description": "The analytics function to execute.",
-                    },
-                    "explanation": {
-                        "type": "string",
-                        "description": "Business insight explanation in Spanish for the user.",
-                    },
-                },
-                "required": ["function_name", "explanation"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "execute_sql",
             "description": (
-                "Generate and execute a custom SQL query for complex data analysis not covered "
-                "by pre-built functions. Only SELECT queries are allowed."
+                "Generate and execute a SQL SELECT query for any data analysis question. "
+                "This is the ONLY way to query data. Always use this for any data-related question."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The SQL SELECT query. Must include WHERE tenant_id = '{TENANT_ID}' and LIMIT.",
+                        "description": "The SQL SELECT query (or WITH ... SELECT CTE). Must include WHERE tenant_id = '{TENANT_ID}' and LIMIT.",
                     },
                     "chart_type": {
                         "type": "string",
-                        "enum": ["bar", "bar_horizontal", "bar_stacked", "line", "pie", "table", "histogram", "area", "area_stacked", "scatter", "combo", "funnel", "treemap", "gauge", "kpi"],
-                        "description": "Best visualization type for the results. Use 'kpi' when the user asks for a KPI card with a single numeric value.",
+                        "enum": ["bar", "bar_horizontal", "bar_stacked", "line", "pie",
+                                 "table", "area", "area_stacked", "scatter", "combo",
+                                 "funnel", "treemap", "gauge", "kpi"],
+                        "description": "Best visualization for the results.",
                     },
                     "title": {
                         "type": "string",
@@ -120,7 +85,7 @@ OPENAI_TOOLS = [
                     },
                     "explanation": {
                         "type": "string",
-                        "description": "Business insight explanation in Spanish for the user.",
+                        "description": "Concise business insight in Spanish (max 3 sentences).",
                     },
                 },
                 "required": ["query", "chart_type", "title", "explanation"],
@@ -148,7 +113,7 @@ OPENAI_TOOLS = [
 
 
 class AIAgent:
-    """AI Agent for natural language query processing with pre-built analytics."""
+    """AI Agent — all data queries produce SQL. No pre-built functions."""
 
     def __init__(self, data_service: DataService):
         self.data_service = data_service
@@ -159,23 +124,18 @@ class AIAgent:
 
         if ANTHROPIC_AVAILABLE and settings.has_ai_key:
             self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-
         if OPENAI_AVAILABLE and settings.has_openai_key:
             self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
 
     def is_available(self) -> bool:
-        """Check if any AI provider is available."""
         return self.client is not None or self.openai_client is not None
 
     @staticmethod
     def _friendly_error(message: str) -> Dict[str, Any]:
-        """Return a user-friendly error as a conversation response."""
         return {
             "type": "conversation",
             "response": message,
-            "data": None,
-            "chart_type": None,
-            "query_details": None,
+            "data": None, "chart_type": None, "query_details": None,
         }
 
     # ------------------------------------------------------------------
@@ -184,154 +144,132 @@ class AIAgent:
 
     def _get_system_prompt(self) -> str:
         schema_desc = self.data_service.get_schema_description()
-        return f"""Eres un analista de datos senior especializado en WhatsApp Business y campanas de comunicacion omnicanal para VISIONAMOS (red de cooperativas financieras en Colombia).
+        return f"""Eres un analista de datos senior para VISIONAMOS (cooperativas financieras, Colombia). Canal principal: WhatsApp.
 
-=== TU PERSONALIDAD ===
-- Analitico, conciso y directo. Cero relleno.
-- Cada respuesta EMPIEZA con el hallazgo principal (dato concreto, cifra exacta).
-- Nunca expliques por que un dato es util o importante. El usuario ya lo sabe.
-- Si hay algo llamativo en los datos (anomalia, pico, concentracion), mencionalo brevemente.
-- Formato: hallazgo principal → dato destacado → observacion breve si aplica. Maximo 3-4 oraciones.
-- Ejemplo bueno: "La hora pico es las 16:00 con 15,960 mensajes, seguida de las 15:00 con 15,655. La actividad se concentra entre 12:00 y 21:00 representando el 94% del total."
-- Ejemplo malo: "Analizar los horarios de mayor actividad es muy util para tu operacion porque te permite..."
-- Respondes en espanol colombiano, profesional y directo.
+=== PERSONALIDAD ===
+- Analitico, conciso, directo. Cero relleno.
+- Cada respuesta EMPIEZA con el hallazgo principal (cifra exacta).
+- Maximo 3-4 oraciones. Espanol colombiano profesional.
 
 {schema_desc}
 
 === CLASIFICACION ===
-Clasifica cada mensaje en UNA de estas categorias:
-
 1. CONVERSATION — Saludos, despedidas, agradecimientos, preguntas sobre ti
-2. ANALYTICS — SOLO para funciones pre-built simples (summary, fallback_rate, messages_by_hour, top_contacts, agent_performance, etc.)
-3. SQL — Cualquier consulta con: agrupaciones temporales (por mes/semana/dia), BOOL_OR, CTEs, clasificacion Bot/Agente/Mixta, combinaciones de tablas, conteos personalizados. SIEMPRE usa SQL para estas.
-4. CLARIFICATION — Cuando la pregunta es ambigua o necesitas mas informacion
-
-IMPORTANTE: Si el usuario pide conversaciones por tipo (Bot/Agente/Mixta), fallbacks por periodo, o cualquier analisis temporal personalizado, NUNCA uses ANALYTICS. Siempre SQL.
+2. SQL — TODAS las preguntas sobre datos. Siempre genera SQL.
+3. CLARIFICATION — Cuando la pregunta es ambigua
 
 === FORMATO DE RESPUESTA ===
-SIEMPRE responde con JSON valido. Sin texto fuera del JSON.
+SIEMPRE JSON valido. Sin texto fuera del JSON.
 
 Para CONVERSATION:
-{{"type": "conversation", "response": "Tu respuesta amigable"}}
+{{"type": "conversation", "response": "Tu respuesta"}}
 
-Para ANALYTICS (funciones pre-built):
-{{"type": "analytics", "function": "NOMBRE_DE_FUNCION", "explanation": "Explicacion con insight de negocio"}}
+Para SQL (TODAS las consultas de datos):
+{{"type": "sql", "query": "SELECT ...", "chart_type": "bar|line|pie|...", "title": "Titulo", "explanation": "Insight conciso"}}
 
-Para SQL (consultas ad-hoc):
-{{"type": "sql", "query": "SELECT ... FROM ... WHERE tenant_id = '{{TENANT_ID}}' ...", "chart_type": "bar|line|pie|table|histogram|area", "title": "Titulo de la grafica", "explanation": "Que muestra esta consulta"}}
-
-Para CLARIFICATION (cuando necesitas mas info):
-{{"type": "clarification", "response": "Tu pregunta especifica para el usuario"}}
-
-=== SELECCION DE TIPO DE GRAFICA (chart_type) ===
-Cuando devuelvas tipo "sql", SIEMPRE incluye chart_type con el tipo mas adecuado:
-- "line" — datos temporales/tendencias (fecha en eje X)
-- "bar" — comparacion entre categorias discretas
-- "pie" — proporciones/distribuciones (maximo 8 categorias)
-- "table" — datos tabulares detallados, KPIs, o muchas columnas
-- "histogram" — distribucion de valores numericos continuos
-- "area" — tendencias acumuladas o series de tiempo con volumen
-Si el usuario pide explicitamente un tipo de grafica, RESPETA su eleccion siempre.
-
-=== FUNCIONES DISPONIBLES ===
-IMPORTANTE: Solo puedes usar estas funciones exactas. No inventes otras.
-
-1. "summary" — Resumen ejecutivo con KPIs principales
-2. "fallback_rate" — Tasa de fallback del bot
-3. "messages_by_direction" — Distribucion Inbound/Bot/Agent
-4. "messages_by_hour" — Volumen por hora del dia
-5. "messages_over_time" — Tendencia diaria
-6. "messages_by_day_of_week" — Volumen por dia de semana
-7. "top_contacts" — Top 10 contactos mas activos
-8. "intent_distribution" — Intenciones mas comunes
-9. "agent_performance" — Rendimiento de agentes humanos
-10. "entity_comparison" — Comparacion entre entidades/cooperativas
-11. "high_messages_day" — Clientes con mas de 4 mensajes en un dia
-12. "high_messages_week" — Clientes con mas de 4 mensajes en una semana
-13. "high_messages_month" — Clientes con mas de 4 mensajes en un mes
+Para CLARIFICATION:
+{{"type": "clarification", "response": "Tu pregunta"}}
 
 === MODELO DE DATOS CRITICO ===
-ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
+1. **chat_conversations** (~45K filas): Cada fila = SESION DE AGENTE.
+   - conversation_session_id = conversacion logica (~22K). Usar COUNT(DISTINCT conversation_session_id)
+   - NO tiene columna "date". Usar queued_at (TIMESTAMP): DATE_TRUNC('month', queued_at)
+   - Ejemplo: SELECT DATE_TRUNC('month', queued_at)::date AS periodo, COUNT(DISTINCT conversation_session_id) AS conversaciones FROM chat_conversations WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
 
-1. **chat_conversations**: Cada fila es una SESION DE AGENTE (~45K filas), NO una conversacion unica.
-   - conversation_session_id = conversacion logica (~22K unicas). Para contar "conversaciones" SIEMPRE usar COUNT(DISTINCT conversation_session_id)
-   - session_id = sesion individual de agente. Una conversacion puede tener multiples sesiones (transferencias entre agentes)
-   - NO tiene columna "date". Para fechas usar queued_at (TIMESTAMP): DATE_TRUNC('month', queued_at)
-   - Ejemplo conversaciones por mes: SELECT DATE_TRUNC('month', queued_at)::date AS periodo, COUNT(DISTINCT conversation_session_id) AS conversaciones FROM chat_conversations WHERE tenant_id = '{TENANT_ID}' GROUP BY 1 ORDER BY 1 LIMIT 100
+2. **messages** (~126K filas): Cada mensaje individual.
+   - conversation_id = session_id de chat_conversations
+   - Tiene columna "date" (DATE) para agrupar por fecha
+   - Para Bot/Humano, clasificar a nivel conversacion:
+     WITH conv_flags AS (SELECT conversation_id, BOOL_OR(is_bot) AS has_bot, BOOL_OR(is_human) AS has_human, BOOL_OR(is_fallback) AS had_fallback FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND conversation_id IS NOT NULL GROUP BY conversation_id)
+   - Categorias: Bot (has_bot AND NOT has_human), Agente (has_human AND NOT has_bot), Mixta (has_bot AND has_human)
 
-2. **messages** (~126K filas): Cada fila es un mensaje individual.
-   - conversation_id = corresponde a session_id de chat_conversations
-   - Tiene columna "date" (tipo DATE) para agrupar por fecha
-   - Para metricas BOT/HUMANO, clasificar A NIVEL DE CONVERSACION (no mensaje):
-     ```WITH conv_flags AS (SELECT conversation_id, BOOL_OR(is_bot) AS has_bot, BOOL_OR(is_human) AS has_human, BOOL_OR(is_fallback) AS had_fallback FROM messages WHERE tenant_id = '{TENANT_ID}' AND conversation_id IS NOT NULL GROUP BY conversation_id)```
-   - Categorias: Bot (solo has_bot), Agente (solo has_human), Mixta (has_bot AND has_human)
-   - Ejemplo fallbacks por mes: WITH conv_flags AS (SELECT conversation_id, DATE_TRUNC('month', MIN(date))::date AS periodo, BOOL_OR(is_fallback) AS had_fallback FROM messages WHERE tenant_id = '{TENANT_ID}' AND conversation_id IS NOT NULL GROUP BY conversation_id) SELECT periodo, COUNT(*) AS conversaciones_fallback FROM conv_flags WHERE had_fallback GROUP BY 1 ORDER BY 1 LIMIT 100
+3. **nps_surveys** (928): score_atencion, score_asesor, nps_categoria, canal_tipo, entity
 
-3. **nps_surveys** (928 registros): score_atencion, score_asesor, nps_categoria (Promotor/Pasivo/Detractor), canal_tipo, entity
+4. CRITICO: messages tiene "date" (DATE), chat_conversations tiene "queued_at" (TIMESTAMP). NUNCA usar "date" en chat_conversations.
 
-4. Si el usuario pide un KPI/tarjeta/numero unico, usa chart_type: "kpi"
+=== TIPO DE GRAFICA (chart_type) ===
+- "line" — datos temporales/tendencias
+- "bar" — comparacion entre categorias
+- "bar_stacked" — categorias con sub-grupos apilados
+- "bar_horizontal" — rankings/top N
+- "pie" — proporciones (max 8 categorias)
+- "area" — tendencias con volumen
+- "table" — datos tabulares o muchas columnas
+- "kpi" — un solo numero/KPI
+- "combo" — barras + linea (dual eje)
 
-5. CRITICO: Cada tabla tiene columnas diferentes para fechas. messages tiene "date" (DATE), chat_conversations tiene "queued_at" (TIMESTAMP). NUNCA uses "date" en chat_conversations.
-
-=== REGLAS PARA SQL ===
-- Solo SELECT (no INSERT, UPDATE, DELETE, DROP, etc.)
-- Tablas core (esquema public): messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
-- Tablas dbt marts (esquema public_marts): public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
-- SIEMPRE usar prefijo public_marts. para tablas de marts
+=== REGLAS SQL ===
+- Solo SELECT (o WITH ... SELECT)
+- Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
+- Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
 - SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}'
-- SIEMPRE incluir LIMIT (maximo 1000)
-- Usa aggregate functions cuando sea posible
-- Prefiere funciones pre-built antes de SQL
-- Nombra las columnas con alias legibles en espanol cuando sea posible (ej: AS "Fecha", AS "Total Mensajes")
+- SIEMPRE incluir LIMIT (max 1000)
+- Alias legibles en espanol (AS "Fecha", AS "Total Mensajes")
 
-=== REGLAS GENERALES ===
-1. Si la pregunta encaja en una funcion pre-built, usala (tipo "analytics")
-2. Solo usa "sql" para preguntas que NO cubren las funciones pre-built
-3. Si no estas seguro que funcion usar, usa "summary"
-4. SIEMPRE agrega un insight de negocio en explanation
-5. Responde en espanol, profesional pero accesible
-6. Si la pregunta es ambigua o le falta contexto, usa "clarification" para pedir mas informacion antes de ejecutar
+=== CONSULTAS COMUNES (SQL de referencia) ===
+
+Resumen general:
+SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages WHERE tenant_id = '{{TENANT_ID}}'
+UNION ALL SELECT 'Contactos', COUNT(DISTINCT contact_id)::text FROM messages WHERE tenant_id = '{{TENANT_ID}}'
+UNION ALL SELECT 'Conversaciones', COUNT(DISTINCT conversation_id)::text FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND conversation_id IS NOT NULL
+LIMIT 10
+
+Tasa de fallback:
+SELECT COUNT(*) FILTER (WHERE is_fallback) AS "Fallbacks", COUNT(*) AS "Total", ROUND(100.0 * COUNT(*) FILTER (WHERE is_fallback) / NULLIF(COUNT(*), 0), 1) AS "Tasa %" FROM messages WHERE tenant_id = '{{TENANT_ID}}' LIMIT 1
+
+Mensajes por hora:
+SELECT hour AS "Hora", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 24
+
+Tendencia diaria:
+SELECT date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
+
+Top contactos:
+SELECT contact_name AS "Contacto", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND contact_name IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+
+Distribucion de intenciones:
+SELECT intent AS "Intencion", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND intent IS NOT NULL AND intent != '' GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+
+Rendimiento de agentes:
+SELECT agent_id AS "Agente", COUNT(*) AS "Mensajes", COUNT(DISTINCT conversation_id) AS "Conversaciones" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
+
+Mensajes por dia de semana:
+SELECT day_of_week AS "Dia", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY CASE day_of_week WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 WHEN 'Saturday' THEN 6 WHEN 'Sunday' THEN 7 END LIMIT 7
 """
 
     def _get_system_prompt_openai(self) -> str:
-        """Simplified system prompt for OpenAI function calling."""
         schema_desc = self.data_service.get_schema_description()
         return f"""Eres un analista de datos senior para VISIONAMOS (cooperativas financieras, Colombia). Canal principal: WhatsApp.
 
 === PERSONALIDAD ===
-- Analitico, conciso, directo. Cero relleno ni parrafos explicativos.
-- Cada respuesta EMPIEZA con el hallazgo concreto (cifra exacta, dato principal).
-- NUNCA digas "esto es util porque..." ni "es importante saber que...". Solo el dato.
-- Si hay anomalia o patron interesante, mencionalo en 1 oracion.
-- Maximo 3-4 oraciones por respuesta. Tono profesional, espanol colombiano.
+- Analitico, conciso, directo. Maximo 3-4 oraciones. Espanol colombiano.
 
 {schema_desc}
 
-=== CONTEXTO DE NEGOCIO ===
-- Cliente: VISIONAMOS (red de cooperativas financieras)
-- Canal principal: WhatsApp (bot + contact center humano)
-- Datos: mensajes, conversaciones, contactos, agentes, estadisticas diarias
-- Periodo: datos historicos de 3 meses
-
 === INSTRUCCIONES ===
-- Para preguntas conversacionales (saludos, ayuda), responde directamente sin herramientas
-- Para analisis de datos SIMPLES (resumen, fallback rate, mensajes por hora, top contactos, rendimiento de agentes), usa execute_analytics
-- Para CUALQUIER consulta que mencione: BOOL_OR, DATE_TRUNC, CTE, WITH, agrupaciones personalizadas, conversaciones por tipo (Bot/Agente/Mixta), periodos temporales especificos, o combinaciones de tablas — SIEMPRE usa execute_sql
+- Para saludos/conversacion, responde directamente sin herramientas
+- Para CUALQUIER pregunta sobre datos, SIEMPRE usa execute_sql con SQL seguro
 - Si la pregunta es ambigua, usa ask_clarification
-- IMPORTANTE: Si el usuario pide clasificar conversaciones por Bot/Agente/Mixta, conteos por mes/semana/dia, o analisis de fallbacks por periodo, esto NO es agent_performance ni ninguna funcion pre-built. Usa execute_sql.
-- En SQL: SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}' y LIMIT
+- NUNCA respondas con texto plano cuando el usuario pide datos. Siempre genera SQL.
 
 === MODELO DE DATOS CRITICO ===
-1. chat_conversations: Cada fila = SESION DE AGENTE (~45K). Para "conversaciones reales" usar COUNT(DISTINCT conversation_session_id) (~22K). NO tiene columna "date" — usar queued_at (TIMESTAMP): DATE_TRUNC('month', queued_at)
-2. messages (~126K): conversation_id = session_id de chat_conversations. Tiene columna "date" (DATE). Para Bot/Humano, clasificar a nivel conversacion: WITH conv_flags AS (SELECT conversation_id, BOOL_OR(is_bot) AS has_bot, BOOL_OR(is_human) AS has_human FROM messages WHERE tenant_id = '{TENANT_ID}' AND conversation_id IS NOT NULL GROUP BY conversation_id)
-3. nps_surveys (928): score_atencion, score_asesor, nps_categoria (Promotor/Pasivo/Detractor), canal_tipo, entity
-4. Para KPIs/tarjetas/numeros unicos, usar chart_type: "kpi"
-5. CRITICO: messages tiene "date" (DATE), chat_conversations tiene "queued_at" (TIMESTAMP). NUNCA usar "date" en chat_conversations.
+1. chat_conversations: Cada fila = SESION DE AGENTE (~45K). COUNT(DISTINCT conversation_session_id) para conversaciones reales (~22K). NO tiene "date" — usar queued_at (TIMESTAMP)
+2. messages (~126K): conversation_id = session_id. Tiene "date" (DATE). Bot/Humano: BOOL_OR por conversation_id
+3. nps_surveys (928): score_atencion, score_asesor, nps_categoria, canal_tipo, entity
+4. CRITICO: messages.date (DATE) vs chat_conversations.queued_at (TIMESTAMP). NUNCA "date" en chat_conversations.
 
 === REGLAS SQL ===
-- Solo SELECT. Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
-- Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, public_marts.fct_agent_performance, public_marts.fct_daily_stats, public_marts.fct_messages_daily, public_marts.fct_toques_metrics
-- Alias legibles en espanol (AS "Fecha", AS "Total Mensajes")
+- Solo SELECT (o WITH ... SELECT)
+- Tablas core: messages, contacts, agents, daily_stats, chat_conversations, campaigns, toques_daily, toques_heatmap, nps_surveys, sms_envios, sms_daily_stats
+- Tablas marts: public_marts.dim_campaigns, public_marts.dim_contacts, etc.
+- SIEMPRE WHERE tenant_id = '{{TENANT_ID}}' y LIMIT
+- Alias legibles en espanol
+
+=== CONSULTAS DE REFERENCIA ===
+Resumen: SELECT 'Mensajes' AS "Metrica", COUNT(*)::text AS "Valor" FROM messages WHERE tenant_id = '{{TENANT_ID}}' UNION ALL SELECT 'Contactos', COUNT(DISTINCT contact_id)::text FROM messages WHERE tenant_id = '{{TENANT_ID}}' LIMIT 10
+Fallback: SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE is_fallback) / NULLIF(COUNT(*), 0), 1) AS "Tasa Fallback %" FROM messages WHERE tenant_id = '{{TENANT_ID}}' LIMIT 1
+Tendencia: SELECT date AS "Fecha", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' GROUP BY 1 ORDER BY 1 LIMIT 100
+Top contactos: SELECT contact_name AS "Contacto", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND contact_name IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+Agentes: SELECT agent_id AS "Agente", COUNT(*) AS "Mensajes" FROM messages WHERE tenant_id = '{{TENANT_ID}}' AND agent_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15
 """
 
     # ------------------------------------------------------------------
@@ -344,14 +282,12 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
         conversation_history: List[Dict] = None,
         tenant_filter: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Process a natural language query using AI or demo mode fallback."""
         try:
             return self._process_query_inner(user_question, conversation_history, tenant_filter)
         except Exception as e:
             logger.error("Unexpected error in process_query: %s", e)
             return self._friendly_error(
-                "Ocurrio un error inesperado procesando tu consulta. "
-                "Por favor intenta reformular tu pregunta o intenta de nuevo en unos momentos."
+                "Ocurrio un error inesperado. Por favor intenta reformular tu pregunta."
             )
 
     def _process_query_inner(
@@ -360,16 +296,7 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
         conversation_history: List[Dict] = None,
         tenant_filter: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # Pre-check for "high messages" queries (deterministic, no LLM needed)
-        question_lower = user_question.lower()
-        high_msg_indicators = [
-            "mas de 4", "mas de 4", "recibieron mas de",
-            "recibieron mas de", "mayor a 4", "superiores a 4",
-        ]
-        if any(ind in question_lower for ind in high_msg_indicators):
-            return self._handle_high_messages(question_lower, tenant_filter)
-
-        # OpenAI GPT-4o with function calling (primary)
+        # OpenAI GPT-4o (primary)
         if self.openai_client is not None:
             result = self._openai_query(user_question, conversation_history, tenant_filter)
             if result is not None:
@@ -381,12 +308,14 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
             if result is not None:
                 return result
 
-        # No AI provider available — use demo mode as last resort
-        logger.warning("No AI provider available, falling back to demo mode")
-        return self._demo_mode_query(user_question, tenant_filter)
+        # No AI provider available
+        logger.warning("No AI provider available")
+        return self._friendly_error(
+            "No hay servicio de IA configurado. Contacta al administrador."
+        )
 
     # ------------------------------------------------------------------
-    # AI query (Claude Sonnet)
+    # Claude (Anthropic)
     # ------------------------------------------------------------------
 
     def _ai_query(
@@ -396,18 +325,13 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
         tenant_filter: Optional[str] = None,
     ) -> Dict[str, Any]:
         try:
-            # Build conversation messages
             messages = []
             if conversation_history:
                 for msg in conversation_history[-8:]:
                     if msg.get("role") in ("user", "assistant"):
-                        messages.append({
-                            "role": msg["role"],
-                            "content": msg.get("content", ""),
-                        })
+                        messages.append({"role": msg["role"], "content": msg.get("content", "")})
             messages.append({"role": "user", "content": user_question})
 
-            # Call Anthropic
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=1024,
@@ -417,8 +341,6 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
             )
 
             response_text = response.content[0].text
-
-            # Parse JSON from response
             try:
                 response_json = json.loads(response_text)
             except json.JSONDecodeError:
@@ -430,81 +352,36 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
 
             resp_type = response_json.get("type", "conversation")
 
-            # --- Conversation ---
-            if resp_type == "conversation":
+            if resp_type in ("conversation", "clarification"):
                 return {
                     "type": "conversation",
                     "response": response_json.get("response", ""),
-                    "data": None,
-                    "chart_type": None,
-                    "query_details": None,
+                    "data": None, "chart_type": None, "query_details": None,
                 }
 
-            # --- Clarification ---
-            if resp_type == "clarification":
-                return {
-                    "type": "conversation",
-                    "response": response_json.get("response", ""),
-                    "data": None,
-                    "chart_type": None,
-                    "query_details": None,
-                }
-
-            # --- Analytics (pre-built function) ---
-            if resp_type == "analytics":
-                function_name = response_json.get("function", "summary")
-                explanation = response_json.get("explanation", "")
-                result = self._execute_function(function_name, tenant_filter)
-                row_count = len(result["data"]) if result["data"] is not None and not result["data"].empty else 0
-                return {
-                    "type": "analytics",
-                    "response": explanation,
-                    "data": result["data"],
-                    "chart_type": result["chart_type"],
-                    "query_details": {"function": function_name, "rows_returned": row_count},
-                }
-
-            # --- SQL (guarded ad-hoc query) ---
             if resp_type == "sql":
-                raw_sql = response_json.get("query", "")
-                explanation = response_json.get("explanation", "")
-                ai_chart = response_json.get("chart_type")
-                ai_title = response_json.get("title")
                 return self._execute_guarded_sql(
-                    raw_sql, explanation, tenant_filter,
-                    chart_type=ai_chart, title=ai_title,
+                    response_json.get("query", ""),
+                    response_json.get("explanation", ""),
+                    tenant_filter,
+                    chart_type=response_json.get("chart_type"),
+                    title=response_json.get("title"),
                 )
 
-            # Unrecognized type
             return None
 
         except anthropic.AuthenticationError:
-            logger.warning("Anthropic authentication failed")
-            return self._friendly_error(
-                "Hay un problema con la configuracion del servicio de IA. "
-                "Por favor contacta al administrador."
-            )
+            return self._friendly_error("Problema de configuracion del servicio de IA.")
         except anthropic.RateLimitError:
-            logger.warning("Anthropic rate limit reached")
-            return self._friendly_error(
-                "El servicio de IA esta temporalmente ocupado. "
-                "Por favor intenta de nuevo en unos segundos."
-            )
+            return self._friendly_error("Servicio de IA ocupado. Intenta en unos segundos.")
         except anthropic.APIConnectionError:
-            logger.warning("Anthropic connection failed")
-            return self._friendly_error(
-                "No se pudo conectar con el servicio de IA. "
-                "Verifica tu conexion a internet e intenta de nuevo."
-            )
-        except anthropic.APIError as e:
-            logger.warning("Anthropic API error: %s", e)
-            return None
+            return self._friendly_error("No se pudo conectar con el servicio de IA.")
         except Exception as e:
             logger.warning("AI query failed: %s", e)
             return None
 
     # ------------------------------------------------------------------
-    # OpenAI with function calling (GPT-4o)
+    # OpenAI GPT-4o
     # ------------------------------------------------------------------
 
     def _openai_query(
@@ -513,16 +390,12 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
         conversation_history: List[Dict] = None,
         tenant_filter: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Process query via OpenAI GPT-4o with native function calling."""
         try:
             messages = [{"role": "system", "content": self._get_system_prompt_openai()}]
             if conversation_history:
                 for msg in conversation_history[-8:]:
                     if msg.get("role") in ("user", "assistant"):
-                        messages.append({
-                            "role": msg["role"],
-                            "content": msg.get("content", ""),
-                        })
+                        messages.append({"role": msg["role"], "content": msg.get("content", "")})
             messages.append({"role": "user", "content": user_question})
 
             response = self.openai_client.chat.completions.create(
@@ -537,90 +410,49 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
             choice = response.choices[0]
             message = choice.message
 
-            # If the model responds with tool calls, process them
             if message.tool_calls:
                 return self._handle_tool_calls(message.tool_calls, tenant_filter)
 
-            # If the model responds with plain text (conversation/greeting)
             if message.content:
                 return {
                     "type": "conversation",
                     "response": message.content,
-                    "data": None,
-                    "chart_type": None,
-                    "query_details": None,
+                    "data": None, "chart_type": None, "query_details": None,
                 }
-
             return None
 
         except openai.AuthenticationError:
-            logger.warning("OpenAI authentication failed")
-            return self._friendly_error(
-                "Hay un problema con la configuracion del servicio de IA. "
-                "Por favor contacta al administrador."
-            )
+            return self._friendly_error("Problema de configuracion del servicio de IA.")
         except openai.RateLimitError:
-            logger.warning("OpenAI rate limit reached")
-            return self._friendly_error(
-                "El servicio de IA esta temporalmente ocupado. "
-                "Por favor intenta de nuevo en unos segundos."
-            )
+            return self._friendly_error("Servicio de IA ocupado. Intenta en unos segundos.")
         except openai.APIConnectionError:
-            logger.warning("OpenAI connection failed")
-            return self._friendly_error(
-                "No se pudo conectar con el servicio de IA. "
-                "Verifica tu conexion a internet e intenta de nuevo."
-            )
+            return self._friendly_error("No se pudo conectar con el servicio de IA.")
         except Exception as e:
-            logger.error("OpenAI query failed, falling back to Claude: %s", e)
-            return None  # Fall through to Claude fallback
+            logger.error("OpenAI query failed: %s", e)
+            return None
 
-    def _handle_tool_calls(
-        self,
-        tool_calls,
-        tenant_filter: Optional[str],
-    ) -> Optional[Dict[str, Any]]:
-        """Process OpenAI function calling tool_calls."""
-        # Process the first tool call (we only expect one per turn)
+    def _handle_tool_calls(self, tool_calls, tenant_filter: Optional[str]) -> Optional[Dict[str, Any]]:
         tool_call = tool_calls[0]
         func_name = tool_call.function.name
         try:
             args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError:
-            logger.warning("Failed to parse tool call arguments: %s", tool_call.function.arguments)
             return None
 
-        if func_name == "execute_analytics":
-            function_name = args.get("function_name", "summary")
-            explanation = args.get("explanation", "")
-            result = self._execute_function(function_name, tenant_filter)
-            row_count = len(result["data"]) if result["data"] is not None and not result["data"].empty else 0
-            return {
-                "type": "analytics",
-                "response": explanation,
-                "data": result["data"],
-                "chart_type": result["chart_type"],
-                "query_details": {"function": function_name, "rows_returned": row_count},
-            }
-
         if func_name == "execute_sql":
-            raw_sql = args.get("query", "")
-            explanation = args.get("explanation", "")
-            chart_type = args.get("chart_type")
-            title = args.get("title")
             return self._execute_guarded_sql(
-                raw_sql, explanation, tenant_filter,
-                chart_type=chart_type, title=title,
+                args.get("query", ""),
+                args.get("explanation", ""),
+                tenant_filter,
+                chart_type=args.get("chart_type"),
+                title=args.get("title"),
             )
 
         if func_name == "ask_clarification":
-            question = args.get("question", "")
             return {
                 "type": "conversation",
-                "response": question,
-                "data": None,
-                "chart_type": None,
-                "query_details": None,
+                "response": args.get("question", ""),
+                "data": None, "chart_type": None, "query_details": None,
             }
 
         return None
@@ -637,11 +469,9 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
         chart_type: Optional[str] = None,
         title: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Execute AI-generated SQL with safety guardrails."""
-
         sql = raw_sql.strip().rstrip(";")
 
-        # 1. Must be a SELECT (or WITH ... SELECT CTE)
+        # 1. Must be SELECT or WITH
         sql_upper = sql.upper().lstrip()
         if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
             return self._sql_error("Solo se permiten consultas SELECT.")
@@ -653,11 +483,9 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
         # 3. Only allowed tables (exclude CTE aliases)
         cte_pattern = re.compile(r"\b(\w+)\s+AS\s*\(", re.IGNORECASE)
         cte_names = {m.lower() for m in cte_pattern.findall(sql)}
-        table_pattern = re.compile(
-            r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_.]*)", re.IGNORECASE
-        )
+        table_pattern = re.compile(r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_.]*)", re.IGNORECASE)
         referenced_tables = {m.lower() for m in table_pattern.findall(sql)}
-        referenced_tables -= cte_names  # CTE aliases are not real tables
+        referenced_tables -= cte_names
         disallowed = referenced_tables - ALLOWED_TABLES
         if disallowed:
             return self._sql_error(
@@ -665,63 +493,50 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
                 f"Tablas disponibles: {', '.join(sorted(ALLOWED_TABLES))}"
             )
 
-        # 4. Inject tenant_id if not present
+        # 4. Inject tenant_id
         tenant = tenant_filter or settings.DEFAULT_TENANT
         sql = sql.replace("{TENANT_ID}", tenant)
         if "tenant_id" not in sql.lower():
             if " WHERE " in sql.upper():
-                sql = re.sub(
-                    r"(?i)\bWHERE\b",
-                    f"WHERE tenant_id = '{tenant}' AND",
-                    sql,
-                    count=1,
-                )
+                sql = re.sub(r"(?i)\bWHERE\b", f"WHERE tenant_id = '{tenant}' AND", sql, count=1)
             else:
-                sql = re.sub(
-                    r"(?i)(FROM\s+[a-zA-Z_][a-zA-Z0-9_.]*)",
-                    rf"\1 WHERE tenant_id = '{tenant}'",
-                    sql,
-                    count=1,
-                )
+                sql = re.sub(r"(?i)(FROM\s+[a-zA-Z_][a-zA-Z0-9_.]*)", rf"\1 WHERE tenant_id = '{tenant}'", sql, count=1)
 
         # 5. Enforce LIMIT
         if "LIMIT" not in sql.upper():
             sql += f" LIMIT {MAX_SQL_ROWS}"
 
-        # 6. Execute with timeout
+        # 6. Execute
         try:
             with engine.connect() as conn:
                 conn.execute(text(f"SET statement_timeout = {SQL_TIMEOUT_MS}"))
                 df = pd.read_sql(text(sql), conn)
 
-            row_count = len(df)
             resolved_chart = chart_type or self._auto_detect_chart_type(df)
             return {
-                "type": "analytics",
+                "type": "sql",
                 "response": explanation,
                 "data": df,
                 "chart_type": resolved_chart,
                 "query_details": {
                     "function": "sql_query",
                     "sql": sql,
-                    "rows_returned": row_count,
+                    "rows_returned": len(df),
                     "title": title,
                 },
             }
-
         except Exception as e:
             logger.warning("SQL execution failed: %s — Query: %s", e, sql)
             return self._sql_error(f"Error ejecutando la consulta: {str(e)[:200]}")
 
     @staticmethod
     def _auto_detect_chart_type(df: pd.DataFrame) -> str:
-        """Auto-detect best chart type from DataFrame shape and content."""
         if df.empty or len(df.columns) < 2:
             return "table"
         x_col = df.columns[0]
         x_lower = x_col.lower()
         n_rows = len(df)
-        if any(kw in x_lower for kw in ["date", "fecha", "time", "dia", "mes", "month", "week"]):
+        if any(kw in x_lower for kw in ["date", "fecha", "time", "dia", "mes", "month", "week", "periodo", "semana"]):
             return "line"
         if n_rows <= 6 and len(df.columns) == 2:
             return "pie"
@@ -734,219 +549,6 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
         return {
             "type": "error",
             "response": f"No pude ejecutar esa consulta. {message}",
-            "data": None,
-            "chart_type": None,
-            "query_details": None,
-        }
-
-    # ------------------------------------------------------------------
-    # Pre-built function execution
-    # ------------------------------------------------------------------
-
-    def _execute_function(self, function_name: str, tenant_filter: Optional[str]) -> Dict[str, Any]:
-        """Execute a pre-built analytics function by name."""
-
-        if function_name == "summary":
-            stats = self.data_service.get_summary_stats(tenant_filter)
-            fallback = self.data_service.get_fallback_rate(tenant_filter)
-            df = pd.DataFrame([
-                {"Metrica": "Total Mensajes", "Valor": f"{stats['total_messages']:,}"},
-                {"Metrica": "Contactos Unicos", "Valor": f"{stats['unique_contacts']:,}"},
-                {"Metrica": "Conversaciones", "Valor": f"{stats['total_conversations']:,}"},
-                {"Metrica": "Agentes Activos", "Valor": f"{stats['active_agents']}"},
-                {"Metrica": "Tasa de Fallback", "Valor": f"{fallback['rate']}%"},
-            ])
-            return {"data": df, "chart_type": "table"}
-
-        elif function_name == "fallback_rate":
-            stats = self.data_service.get_fallback_rate(tenant_filter)
-            status = "Saludable" if stats["rate"] < 15 else "Necesita atencion"
-            df = pd.DataFrame([{
-                "Metrica": "Tasa de Fallback",
-                "Total Mensajes": f"{stats['total']:,}",
-                "Mensajes Fallback": f"{stats['fallback_count']:,}",
-                "Porcentaje": f"{stats['rate']}%",
-                "Estado": status,
-            }])
-            return {"data": df, "chart_type": "table"}
-
-        elif function_name == "messages_by_direction":
-            return {"data": self.data_service.get_messages_by_direction(tenant_filter), "chart_type": "pie"}
-
-        elif function_name == "messages_by_hour":
-            return {"data": self.data_service.get_messages_by_hour(tenant_filter), "chart_type": "bar"}
-
-        elif function_name == "messages_over_time":
-            return {"data": self.data_service.get_messages_over_time(tenant_filter), "chart_type": "line"}
-
-        elif function_name == "messages_by_day_of_week":
-            return {"data": self.data_service.get_messages_by_day_of_week(tenant_filter), "chart_type": "bar"}
-
-        elif function_name == "top_contacts":
-            return {"data": self.data_service.get_top_contacts(tenant_filter, limit=10), "chart_type": "bar"}
-
-        elif function_name == "intent_distribution":
-            return {"data": self.data_service.get_intent_distribution(tenant_filter, limit=10), "chart_type": "bar"}
-
-        elif function_name == "agent_performance":
-            return {"data": self.data_service.get_agent_performance(tenant_filter), "chart_type": "bar"}
-
-        elif function_name == "entity_comparison":
-            messages_df = self.data_service.get_messages_dataframe(tenant_filter)
-            if not messages_df.empty and "tenant_id" in messages_df.columns:
-                df = messages_df.groupby("tenant_id").size().reset_index(name="count")
-                df = df.sort_values("count", ascending=False).head(15)
-            else:
-                df = pd.DataFrame(columns=["tenant_id", "count"])
-            return {"data": df, "chart_type": "bar"}
-
-        elif function_name == "high_messages_day":
-            return {"data": self.data_service.get_customers_with_high_messages("day", 4, tenant_filter), "chart_type": "table"}
-
-        elif function_name == "high_messages_week":
-            return {"data": self.data_service.get_customers_with_high_messages("week", 4, tenant_filter), "chart_type": "table"}
-
-        elif function_name == "high_messages_month":
-            return {"data": self.data_service.get_customers_with_high_messages("month", 4, tenant_filter), "chart_type": "table"}
-
-        else:
-            return self._execute_function("summary", tenant_filter)
-
-    # ------------------------------------------------------------------
-    # High-messages shortcut (deterministic, no LLM)
-    # ------------------------------------------------------------------
-
-    def _handle_high_messages(self, question_lower: str, tenant_filter: Optional[str]) -> Dict[str, Any]:
-        if any(p in question_lower for p in ["semana", "semanal", "weekly", "7 dias", "7 dias"]):
-            func_name, period_text = "high_messages_week", "por semana"
-        elif any(p in question_lower for p in ["mes", "mensual", "monthly", "30 dias", "30 dias"]):
-            func_name, period_text = "high_messages_month", "por mes"
-        else:
-            func_name, period_text = "high_messages_day", "por dia"
-
-        result = self._execute_function(func_name, tenant_filter)
-        count = len(result["data"]) if result["data"] is not None and not result["data"].empty else 0
-
-        return {
-            "type": "analytics",
-            "response": (
-                f"Encontre {count:,} registros de clientes que recibieron mas de 4 mensajes "
-                f"{period_text}. Estos clientes pueden requerir atencion especial."
-            ),
-            "data": result["data"],
-            "chart_type": result["chart_type"],
-            "query_details": {"function": func_name, "rows_returned": count},
-        }
-
-    # ------------------------------------------------------------------
-    # Demo mode (keyword matching fallback, no API key needed)
-    # ------------------------------------------------------------------
-
-    def _demo_mode_query(self, question: str, tenant_filter: Optional[str]) -> Dict[str, Any]:
-        """Pattern match without API — used when no Anthropic key is configured."""
-        q = question.lower().strip()
-
-        greetings = ["hola", "hello", "hi", "buenos dias", "buenas tardes", "buenas noches", "hey", "que tal"]
-        if any(q.startswith(g) or q == g for g in greetings):
-            return {
-                "type": "conversation",
-                "response": (
-                    "Hola! Soy tu asistente de analitica. Puedo ayudarte a:\n\n"
-                    "- Ver el rendimiento del bot (fallback)\n"
-                    "- Analizar horarios pico\n"
-                    "- Revisar agentes y contactos\n"
-                    "- Comparar entidades\n\n"
-                    "Que te gustaria analizar?"
-                ),
-                "data": None, "chart_type": None, "query_details": None,
-            }
-
-        if any(t in q for t in ["gracias", "thanks", "thank you"]):
-            return {
-                "type": "conversation",
-                "response": "Con gusto! Si necesitas mas analisis, aqui estoy.",
-                "data": None, "chart_type": None, "query_details": None,
-            }
-
-        if any(g in q for g in ["adios", "bye", "chao", "hasta luego"]):
-            return {
-                "type": "conversation",
-                "response": "Hasta luego! Vuelve cuando necesites revisar las metricas.",
-                "data": None, "chart_type": None, "query_details": None,
-            }
-
-        if any(h in q for h in ["ayuda", "help", "que puedes", "que haces"]):
-            return {
-                "type": "conversation",
-                "response": (
-                    "Puedo ayudarte con:\n\n"
-                    "- **Bot:** \"Como esta el fallback?\"\n"
-                    "- **Horarios:** \"Cual es el horario pico?\"\n"
-                    "- **Agentes:** \"Rendimiento de agentes\"\n"
-                    "- **Contactos:** \"Top 10 contactos\"\n"
-                    "- **Tendencias:** \"Muestra la tendencia\"\n"
-                    "- **Entidades:** \"Comparar entidades\"\n"
-                    "- **Resumen:** \"Dame un resumen\""
-                ),
-                "data": None, "chart_type": None, "query_details": None,
-            }
-
-        patterns = [
-            (["fallback", "fallo", "entiende", "calidad bot"], "fallback_rate",
-             "Aqui tienes la tasa de fallback del bot. Un valor menor a 15% es saludable."),
-            (["intent", "intencion", "tema", "motivo"], "intent_distribution",
-             "Distribucion de intenciones detectadas por el bot. Revela que necesitan los usuarios."),
-            (["canal", "direccion", "inbound", "tipo de mensaje"], "messages_by_direction",
-             "Distribucion de mensajes por tipo: Inbound (usuario), Bot, Agente humano y Sistema."),
-            (["hora", "horario", "pico", "trafico"], "messages_by_hour",
-             "Volumen de mensajes por hora del dia. Los picos revelan los horarios de mayor demanda."),
-            (["tendencia", "tiempo", "historico", "evolucion", "crecimiento"], "messages_over_time",
-             "Tendencia diaria de mensajes. Permite identificar patrones de crecimiento o caida."),
-            (["top", "contacto", "activo", "frecuente", "mas mensaje", "mayor mensaje",
-              "mas activo", "mayor volumen"], "top_contacts",
-             "Los 10 contactos mas activos por volumen de mensajes."),
-            (["agente", "operador", "rendimiento", "equipo", "asesor"], "agent_performance",
-             "Rendimiento de agentes humanos: mensajes atendidos y conversaciones manejadas."),
-            (["semana", "lunes", "martes", "viernes", "sabado", "dia de la semana",
-              "dia semana", "dia con mas", "dia mas"], "messages_by_day_of_week",
-             "Actividad por dia de la semana. Util para planificar turnos y capacidad."),
-            (["cooperativa", "entidad", "comparar", "organizacion"], "entity_comparison",
-             "Comparacion de volumen entre entidades/cooperativas."),
-            (["distribucion"], "messages_by_direction",
-             "Distribucion de mensajes por tipo: Inbound (usuario), Bot, Agente humano y Sistema."),
-            (["bot", "automatizacion", "chatbot", "robot"], "fallback_rate",
-             "Aqui tienes la tasa de fallback del bot. Un valor menor a 15% es saludable."),
-            (["mensaje", "volumen", "cantidad"], "messages_over_time",
-             "Tendencia diaria de mensajes. Permite identificar patrones y volumen."),
-            (["resumen", "total", "cuantos", "estadistica", "general", "summary",
-              "dashboard", "kpi", "metricas"], "summary",
-             "Resumen ejecutivo con las metricas principales de la operacion."),
-        ]
-
-        for keywords, func_name, explanation in patterns:
-            if any(kw in q for kw in keywords):
-                result = self._execute_function(func_name, tenant_filter)
-                row_count = len(result["data"]) if result["data"] is not None and not result["data"].empty else 0
-                return {
-                    "type": "analytics",
-                    "response": explanation,
-                    "data": result["data"],
-                    "chart_type": result["chart_type"],
-                    "query_details": {"function": func_name, "rows_returned": row_count},
-                }
-
-        return {
-            "type": "conversation",
-            "response": (
-                "No reconozco esa consulta. Intenta preguntar sobre:\n\n"
-                "- Resumen general\n"
-                "- Tasa de fallback\n"
-                "- Mensajes por hora\n"
-                "- Tendencia de mensajes\n"
-                "- Top contactos\n"
-                "- Rendimiento de agentes\n"
-                "- Comparacion de entidades"
-            ),
             "data": None, "chart_type": None, "query_details": None,
         }
 
@@ -958,12 +560,12 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
     def get_suggested_questions() -> List[str]:
         return [
             "Dame un resumen general de los datos",
-            "Cual es la tasa de fallback?",
+            "Cual es la tasa de fallback del bot?",
             "Mensajes por hora del dia",
             "Top 10 contactos mas activos",
             "Rendimiento de agentes",
-            "Comparacion entre entidades",
-            "Distribucion de intenciones",
-            "Mensajes por dia de la semana",
             "Tendencia de mensajes en el tiempo",
+            "Conversaciones por mes clasificadas por Bot, Agente y Mixta",
+            "Top intenciones que producen fallback",
+            "KPIs del Contact Center",
         ]

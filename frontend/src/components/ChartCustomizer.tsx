@@ -1,6 +1,7 @@
-import { X, Palette, Type, RulerIcon, BarChart3, Columns3, Gauge } from 'lucide-react'
-import type { ChartType } from '../types'
+import { X, Palette, Type, RulerIcon, BarChart3, Columns3, Gauge, Code } from 'lucide-react'
+import type { ChartType, QueryResult } from '../types'
 import { COLOR_PALETTES, FONT_FAMILIES } from '../types'
+import SqlVariables from './SqlVariables'
 
 export interface ChartConfig {
   chartType: ChartType
@@ -42,9 +43,12 @@ interface Props {
   onChange: (config: ChartConfig) => void
   onClose: () => void
   availableColumns?: string[]
+  sql?: string
+  lastResult?: QueryResult | null
+  onResultUpdate?: (result: QueryResult) => void
 }
 
-export default function ChartCustomizer({ config, onChange, onClose, availableColumns = [] }: Props) {
+export default function ChartCustomizer({ config, onChange, onClose, availableColumns = [], sql, lastResult, onResultUpdate }: Props) {
   const update = <K extends keyof ChartConfig>(key: K, value: ChartConfig[K]) => {
     onChange({ ...config, [key]: value })
   }
@@ -76,6 +80,19 @@ export default function ChartCustomizer({ config, onChange, onClose, availableCo
       </div>
 
       <div className="p-3 space-y-4">
+        {/* SQL Variables — interactive SQL modification */}
+        {sql && lastResult && onResultUpdate && (
+          <section>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Code size={12} className="text-primary" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+                Variables SQL
+              </p>
+            </div>
+            <SqlVariables sql={sql} lastResult={lastResult} onResultUpdate={onResultUpdate} />
+          </section>
+        )}
+
         {/* Column Assignment (Power BI-style) */}
         {availableColumns.length >= 2 && (
           <section>
