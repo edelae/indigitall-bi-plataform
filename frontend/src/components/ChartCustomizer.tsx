@@ -1,4 +1,4 @@
-import { X, Palette, Type, RulerIcon, BarChart3, Columns3 } from 'lucide-react'
+import { X, Palette, Type, RulerIcon, BarChart3, Columns3, Gauge } from 'lucide-react'
 import type { ChartType } from '../types'
 import { COLOR_PALETTES, FONT_FAMILIES } from '../types'
 
@@ -14,6 +14,9 @@ export interface ChartConfig {
   xColumn?: string
   yColumns?: string[]
   groupByColumn?: string
+  kpiStyle?: 'minimal' | 'accent' | 'progress'
+  kpiColor?: string
+  kpiMaxValue?: number
 }
 
 const CHART_OPTIONS: { value: ChartType; label: string }[] = [
@@ -157,8 +160,58 @@ export default function ChartCustomizer({ config, onChange, onClose, availableCo
           </div>
         </section>
 
+        {/* KPI Style (only when chart type is kpi) */}
+        {config.chartType === 'kpi' && (
+          <section>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Gauge size={12} className="text-primary" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+                Estilo de tarjeta
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-1 mb-3">
+              {([['accent', 'Con icono'], ['minimal', 'Minimal'], ['progress', 'Progreso']] as const).map(([val, label]) => (
+                <button key={val}
+                  onClick={() => update('kpiStyle', val)}
+                  className={`px-1.5 py-1.5 rounded-btn text-[10px] text-center transition-colors ${
+                    (config.kpiStyle || 'accent') === val
+                      ? 'bg-primary text-white'
+                      : 'text-text-muted hover:bg-surface'
+                  }`}
+                  style={(config.kpiStyle || 'accent') !== val ? { backgroundColor: 'var(--bg-surface)' } : {}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <label className="text-[10px] mb-0.5 block font-medium" style={{ color: 'var(--text-muted)' }}>Color</label>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {['#1E88E5', '#76C043', '#9C27B0', '#FF5722', '#FFC107', '#EF4444', '#1565C0', '#A0A3BD'].map(c => (
+                <button key={c}
+                  onClick={() => update('kpiColor', c)}
+                  className={`w-6 h-6 rounded-full transition-all ${
+                    (config.kpiColor || '#1E88E5') === c ? 'ring-2 ring-offset-1 ring-primary scale-110' : 'hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+
+            {(config.kpiStyle || 'accent') === 'progress' && (
+              <>
+                <label className="text-[10px] mb-0.5 block font-medium" style={{ color: 'var(--text-muted)' }}>Valor maximo (meta)</label>
+                <input className="input text-xs"
+                  type="number" min="1"
+                  placeholder="Ej: 1000"
+                  value={config.kpiMaxValue || ''}
+                  onChange={e => update('kpiMaxValue', parseInt(e.target.value) || undefined)} />
+              </>
+            )}
+          </section>
+        )}
+
         {/* Color palette */}
-        <section>
+        {config.chartType !== 'kpi' && <section>
           <div className="flex items-center gap-1.5 mb-2">
             <Palette size={12} className="text-primary" />
             <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
@@ -188,7 +241,7 @@ export default function ChartCustomizer({ config, onChange, onClose, availableCo
               </button>
             ))}
           </div>
-        </section>
+        </section>}
 
         {/* Axis labels */}
         <section>

@@ -320,7 +320,7 @@ export default function QueryChat() {
                 </button>
               ))}
               <div className="ml-auto flex gap-1">
-                {hasData && !isKpi && (
+                {(hasData || isKpi) && (
                   <button
                     onClick={() => setShowCustomizer(!showCustomizer)}
                     className={`btn-ghost text-xs flex items-center gap-1 ${showCustomizer ? 'text-primary' : ''}`}
@@ -355,7 +355,9 @@ export default function QueryChat() {
                             label={col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                             value={lastResult.data[0][col]}
                             icon={BarChart3}
-                            color={PRIMARY_COLOR}
+                            color={chartConfig.kpiColor || PRIMARY_COLOR}
+                            kpiStyle={chartConfig.kpiStyle || 'accent'}
+                            maxValue={chartConfig.kpiMaxValue}
                           />
                         ))}
                       </div>
@@ -372,7 +374,9 @@ export default function QueryChat() {
                               label={label}
                               value={value}
                               icon={BarChart3}
-                              color={PRIMARY_COLOR}
+                              color={chartConfig.kpiColor || PRIMARY_COLOR}
+                              kpiStyle={chartConfig.kpiStyle || 'accent'}
+                              maxValue={chartConfig.kpiMaxValue}
                             />
                           )
                         })}
@@ -607,7 +611,7 @@ export default function QueryChat() {
       </div>
 
       {/* Chart Customizer Sidebar */}
-      {showCustomizer && hasData && (
+      {showCustomizer && (hasData || isKpi) && (
         <ChartCustomizer
           config={chartConfig}
           onChange={handleConfigChange}

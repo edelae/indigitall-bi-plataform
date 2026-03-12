@@ -1056,7 +1056,9 @@ TABLA: daily_stats (85+ filas)
 Columnas: tenant_id, date, total_messages, unique_contacts, conversations, fallback_count
 
 TABLA: chat_conversations (60K+ filas — sesiones de agente)
-Columnas: session_id, conversation_session_id, contact_id, agent_id, agent_email, channel, queued_at, assigned_at, closed_at, initial_session_id, wait_time_seconds, handle_time_seconds, tenant_id
+Columnas: session_id, conversation_session_id, contact_id, agent_id, agent_email, channel, queued_at (TIMESTAMP), assigned_at (TIMESTAMP), closed_at (TIMESTAMP), initial_session_id, wait_time_seconds, handle_time_seconds, tenant_id
+- ATENCION: NO tiene columna "date". Para fechas usa queued_at::date o DATE_TRUNC('month', queued_at)
+- Para contar conversaciones por mes: DATE_TRUNC('month', queued_at) ... COUNT(DISTINCT conversation_session_id)
 
 TABLA: chat_channels (canales de comunicacion)
 Columnas: channel_id, channel_type, channel_name, phone_number, status, config, tenant_id
