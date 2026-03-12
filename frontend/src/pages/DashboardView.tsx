@@ -88,8 +88,15 @@ export default function DashboardView() {
   const [infoModal, setInfoModal] = useState<DashboardWidget | null>(null)
   const [tabs, setTabs] = useState<DashboardTab[]>([])
   const [activeTabId, setActiveTabId] = useState('')
+  const [ready, setReady] = useState(false)
   const canvasRef = useRef<HTMLDivElement>(null)
   const canvasWidth = useContainerWidth(canvasRef)
+
+  // Defer heavy grid render until after first paint
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setReady(true))
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -286,6 +293,11 @@ export default function DashboardView() {
               <Pencil size={14} /> Editar tablero
             </Link>
           </div>
+        ) : !ready ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={28} className="animate-spin text-primary" />
+            <span className="ml-2 text-sm text-[#6B7280]">Cargando widgets...</span>
+          </div>
         ) : (
           <Responsive
             width={canvasWidth}
@@ -380,7 +392,7 @@ export default function DashboardView() {
                             <div className="flex-1" style={{ position: 'relative', minHeight: 0 }}>
                               <div style={{ position: 'absolute', inset: 4 }}>
                                 <ChartWidget
-                                  data={w.data}
+                                  data={w.data.length > 500 ? w.data.slice(0, 500) : w.data}
                                   columns={w.columns}
                                   chartType={(w.chart_type || w.type || 'bar') as ChartType}
                                   fillContainer

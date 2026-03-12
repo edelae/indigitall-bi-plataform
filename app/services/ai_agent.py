@@ -202,9 +202,11 @@ class AIAgent:
 Clasifica cada mensaje en UNA de estas categorias:
 
 1. CONVERSATION — Saludos, despedidas, agradecimientos, preguntas sobre ti
-2. ANALYTICS — Preguntas sobre datos que requieren una funcion de analisis
-3. SQL — Preguntas complejas que NO cubren las funciones pre-built
+2. ANALYTICS — SOLO para funciones pre-built simples (summary, fallback_rate, messages_by_hour, top_contacts, agent_performance, etc.)
+3. SQL — Cualquier consulta con: agrupaciones temporales (por mes/semana/dia), BOOL_OR, CTEs, clasificacion Bot/Agente/Mixta, combinaciones de tablas, conteos personalizados. SIEMPRE usa SQL para estas.
 4. CLARIFICATION — Cuando la pregunta es ambigua o necesitas mas informacion
+
+IMPORTANTE: Si el usuario pide conversaciones por tipo (Bot/Agente/Mixta), fallbacks por periodo, o cualquier analisis temporal personalizado, NUNCA uses ANALYTICS. Siempre SQL.
 
 === FORMATO DE RESPUESTA ===
 SIEMPRE responde con JSON valido. Sin texto fuera del JSON.
@@ -313,10 +315,10 @@ ATENCION: El modelo de datos tiene jerarquias que DEBES respetar:
 
 === INSTRUCCIONES ===
 - Para preguntas conversacionales (saludos, ayuda), responde directamente sin herramientas
-- Para analisis de datos, usa execute_analytics si hay una funcion pre-built que aplique
-- Para consultas complejas no cubiertas, usa execute_sql con SQL seguro (solo SELECT)
+- Para analisis de datos SIMPLES (resumen, fallback rate, mensajes por hora, top contactos, rendimiento de agentes), usa execute_analytics
+- Para CUALQUIER consulta que mencione: BOOL_OR, DATE_TRUNC, CTE, WITH, agrupaciones personalizadas, conversaciones por tipo (Bot/Agente/Mixta), periodos temporales especificos, o combinaciones de tablas — SIEMPRE usa execute_sql
 - Si la pregunta es ambigua, usa ask_clarification
-- Prefiere funciones pre-built sobre SQL ad-hoc cuando sea posible
+- IMPORTANTE: Si el usuario pide clasificar conversaciones por Bot/Agente/Mixta, conteos por mes/semana/dia, o analisis de fallbacks por periodo, esto NO es agent_performance ni ninguna funcion pre-built. Usa execute_sql.
 - En SQL: SIEMPRE incluir WHERE tenant_id = '{{TENANT_ID}}' y LIMIT
 
 === MODELO DE DATOS CRITICO ===
