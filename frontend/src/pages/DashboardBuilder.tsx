@@ -14,8 +14,8 @@ import KpiCard from '../components/KpiCard'
 import type { DashboardWidget, SavedQuery, ChartType, GridTemplate, DashboardGranularity, DashboardFilter } from '../types'
 import {
   GRID_TEMPLATES, PRIMARY_COLOR, COLOR_PALETTES, FONT_FAMILIES, SIZE_PRESETS,
-  CARD_STYLE_PRESETS, GRANULARITY_OPTIONS, transformSqlGranularity, getCardStyle,
-  detectFilterableColumns, applyDashboardFilters,
+  CARD_STYLE_PRESETS, GRANULARITY_OPTIONS, getCardStyle,
+  detectFilterableColumns, applyDashboardFilters, transformDataGranularity, hasDateData,
 } from '../types'
 import {
   listQueries, getQuery, getDashboard,
@@ -188,6 +188,8 @@ export default function DashboardBuilder() {
             tabMap.get(tid)!.widgets.push({
               ...w,
               original_sql: w.sql || w.original_sql,
+              original_data: w.data,
+              original_columns: w.columns,
               grid_i: w.grid_i || `widget-${Math.random().toString(36).slice(2)}`,
               grid_x: w.grid_x ?? 0, grid_y: w.grid_y ?? 0,
               grid_w: w.grid_w ?? w.width ?? 6, grid_h: w.grid_h ?? 4,
@@ -200,6 +202,8 @@ export default function DashboardBuilder() {
           const loaded = layout.map((w: DashboardWidget, i: number) => ({
             ...w,
             original_sql: w.sql || w.original_sql,
+            original_data: w.data,
+            original_columns: w.columns,
             grid_i: w.grid_i || `widget-${i}`,
             grid_x: w.grid_x ?? (i % 2) * 6, grid_y: w.grid_y ?? Math.floor(i / 2) * 4,
             grid_w: w.grid_w ?? w.width ?? 6, grid_h: w.grid_h ?? 4,
@@ -220,13 +224,17 @@ export default function DashboardBuilder() {
       const viz = q.visualizations?.[0] || {} as Record<string, any>
       const chartType = viz.type || 'bar'
       const isKpi = chartType === 'kpi'
+      const widgetData = q.result_data || []
+      const widgetCols = (q.result_columns || []).map(c => c.name)
       const newWidget: DashboardWidget = {
         query_id: q.id,
         title: q.name.slice(0, 60),
         type: chartType, chart_type: chartType,
         width: w,
-        data: q.result_data || [],
-        columns: (q.result_columns || []).map(c => c.name),
+        data: widgetData,
+        columns: widgetCols,
+        original_data: widgetData,
+        original_columns: widgetCols,
         sql: q.generated_sql || '', query_text: q.query_text || '',
         grid_i: `widget-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         grid_x: x, grid_y: y, grid_w: w, grid_h: h,
@@ -303,35 +311,41 @@ export default function DashboardBuilder() {
   }, [])
 
   // ─── Granularity filter ────────────────────────────────────
-  const hasDateTruncWidgets = tabs.some(t => t.widgets.some(w => (w.original_sql || w.sql || '').match(/DATE_TRUNC/i)))
+  const hasDateWidgets = useMemo(() => {
+    return tabs.some(t => t.widgets.some(w =>
+      hasDateData(w.original_data || w.data, w.original_columns || w.columns)
+    ))
+  }, [tabs])
 
   const handleGranularityChange = useCallback(async (gran: DashboardGranularity) => {
     setGranularity(gran)
     if (gran === 'original') {
-      // Restore original SQL for all widgets
+      // Restore original data and SQL for all widgets
       setTabs(prev => prev.map(tab => ({
         ...tab,
-        widgets: tab.widgets.map(w => {
-          if (!w.original_sql) return w
-          return { ...w, sql: w.original_sql }
-        }),
+        widgets: tab.widgets.map(w => ({
+          ...w,
+          data: w.original_data || w.data,
+          columns: w.original_columns || w.columns,
+          sql: w.original_sql || w.sql,
+        })),
       })))
       return
     }
     setGranLoading(true)
-    const newTabs = await Promise.all(tabs.map(async tab => {
-      const newWidgets = await Promise.all(tab.widgets.map(async w => {
-        const origSql = w.original_sql || w.sql
-        if (!origSql || !origSql.match(/DATE_TRUNC/i)) return w
-        const transformed = transformSqlGranularity(origSql, gran)
-        try {
-          const res = await executeSql(transformed)
-          return { ...w, data: res.data, columns: res.columns, sql: transformed, original_sql: origSql }
-        } catch { return w }
-      }))
-      return { ...tab, widgets: newWidgets }
-    }))
-    setTabs(newTabs)
+    setTabs(prev => prev.map(tab => ({
+      ...tab,
+      widgets: tab.widgets.map(w => {
+        const srcData = w.original_data || w.data
+        const srcCols = w.original_columns || w.columns
+        // Try client-side transformation first
+        const transformed = transformDataGranularity(srcData, srcCols, gran)
+        if (transformed) {
+          return { ...w, data: transformed.data, columns: transformed.columns }
+        }
+        return w
+      }),
+    })))
     setGranLoading(false)
   }, [tabs])
 
@@ -374,10 +388,12 @@ export default function DashboardBuilder() {
       // Reset to original data
       setTabs(prev => prev.map(tab => ({
         ...tab,
-        widgets: tab.widgets.map(w => {
-          if (!w.original_sql) return w
-          return { ...w, sql: w.original_sql }
-        }),
+        widgets: tab.widgets.map(w => ({
+          ...w,
+          data: w.original_data || w.data,
+          columns: w.original_columns || w.columns,
+          sql: w.original_sql || w.sql,
+        })),
       })))
       return
     }
@@ -482,6 +498,7 @@ export default function DashboardBuilder() {
         title: title || question.slice(0, 60),
         type: chartType, chart_type: chartType,
         width: isKpi ? 3 : 6, data, columns,
+        original_data: data, original_columns: columns,
         sql: sql || '', query_text: question,
         grid_i: `ai-${Date.now()}`, grid_x: 0, grid_y: 0,
         grid_w: isKpi ? 3 : 6, grid_h: isKpi ? 2 : 4,
@@ -594,7 +611,7 @@ export default function DashboardBuilder() {
       )}
 
       {/* Granularity filter bar */}
-      {hasDateTruncWidgets && (
+      {hasDateWidgets && (
         <div className="flex items-center gap-2 mb-3 px-1">
           <Calendar size={14} className="text-[#6B7280]" />
           <span className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">Agrupar por:</span>

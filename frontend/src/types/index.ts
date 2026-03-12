@@ -126,6 +126,9 @@ export interface DashboardWidget {
   text_align?: 'left' | 'center' | 'right'
   // Original SQL (before granularity filter transforms)
   original_sql?: string
+  // Transient: original data before granularity transform (not persisted)
+  original_data?: Record<string, any>[]
+  original_columns?: string[]
 }
 
 // Font family options
@@ -527,6 +530,81 @@ export function transformSqlGranularity(sql: string, granularity: DashboardGranu
       return sql
   }
   return transformed
+}
+
+// Detect date-like column from data
+function findDateColumn(data: Record<string, any>[], columns: string[]): string | null {
+  const datePattern = /^\d{4}-\d{2}-\d{2}/
+  for (const col of columns) {
+    const sample = data.find(r => r[col] != null && r[col] !== '')
+    if (!sample) continue
+    const val = String(sample[col])
+    if (datePattern.test(val)) return col
+  }
+  return null
+}
+
+// Client-side granularity transform — works for ALL widgets with date data
+const DAY_NAMES = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo']
+const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+export function transformDataGranularity(
+  data: Record<string, any>[],
+  columns: string[],
+  granularity: DashboardGranularity
+): { data: Record<string, any>[]; columns: string[] } | null {
+  if (granularity === 'original' || !data?.length || !columns?.length) return null
+
+  const dateCol = findDateColumn(data, columns)
+  if (!dateCol) return null
+
+  const numCols = columns.filter(c => c !== dateCol && data.some(r => typeof r[c] === 'number'))
+  const otherCols = columns.filter(c => c !== dateCol && !numCols.includes(c))
+
+  const groups = new Map<string, { sortKey: number; rows: Record<string, any>[] }>()
+
+  for (const row of data) {
+    const d = new Date(row[dateCol])
+    if (isNaN(d.getTime())) continue
+
+    let key: string, sortKey: number
+    switch (granularity) {
+      case 'dia_semana': {
+        const dow = (d.getDay() + 6) % 7
+        key = DAY_NAMES[dow]; sortKey = dow; break
+      }
+      case 'mes': {
+        key = MONTH_NAMES[d.getMonth()]; sortKey = d.getMonth(); break
+      }
+      case 'anio': {
+        key = String(d.getFullYear()); sortKey = d.getFullYear(); break
+      }
+      default: return null
+    }
+
+    if (!groups.has(key)) groups.set(key, { sortKey, rows: [] })
+    groups.get(key)!.rows.push(row)
+  }
+
+  const sorted = Array.from(groups.entries()).sort((a, b) => a[1].sortKey - b[1].sortKey)
+
+  const result = sorted.map(([key, { rows }]) => {
+    const agg: Record<string, any> = { [dateCol]: key }
+    for (const col of numCols) {
+      agg[col] = rows.reduce((sum, r) => sum + (Number(r[col]) || 0), 0)
+    }
+    for (const col of otherCols) {
+      agg[col] = rows[0]?.[col]
+    }
+    return agg
+  })
+
+  return { data: result, columns }
+}
+
+// Check if widget data has a date-like column
+export function hasDateData(data: Record<string, any>[], columns: string[]): boolean {
+  return findDateColumn(data || [], columns || []) !== null
 }
 
 export function getCardStyle(preset?: string): React.CSSProperties {

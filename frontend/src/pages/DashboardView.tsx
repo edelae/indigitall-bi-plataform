@@ -6,7 +6,7 @@ import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
 import DashboardAnalyst from '../components/DashboardAnalyst'
 import type { Dashboard, DashboardWidget, ChartType, DashboardGranularity, DashboardFilter } from '../types'
-import { PRIMARY_COLOR, COLOR_PALETTES, GRANULARITY_OPTIONS, transformSqlGranularity, getCardStyle, detectFilterableColumns, applyDashboardFilters } from '../types'
+import { PRIMARY_COLOR, COLOR_PALETTES, GRANULARITY_OPTIONS, getCardStyle, detectFilterableColumns, applyDashboardFilters, transformDataGranularity, hasDateData } from '../types'
 import { getDashboard, executeSql } from '../api/client'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -88,6 +88,8 @@ export default function DashboardView() {
             tabMap.get(tid)!.widgets.push({
               ...w,
               original_sql: w.sql || w.original_sql,
+              original_data: w.data,
+              original_columns: w.columns,
               grid_i: w.grid_i || `w-${tabMap.get(tid)!.widgets.length}`,
               grid_x: w.grid_x ?? 0,
               grid_y: w.grid_y ?? 0,
@@ -102,6 +104,8 @@ export default function DashboardView() {
           const widgets = layout.map((w: any, i: number) => ({
             ...w,
             original_sql: w.sql || w.original_sql,
+            original_data: w.data,
+            original_columns: w.columns,
             grid_i: w.grid_i || `widget-${i}`,
             grid_x: w.grid_x ?? (i % 2) * 6,
             grid_y: w.grid_y ?? Math.floor(i / 2) * 4,
@@ -120,41 +124,42 @@ export default function DashboardView() {
       .finally(() => setLoading(false))
   }, [id])
 
-  // Granularity filter — re-execute all widgets with transformed SQL
+  // Granularity filter — client-side data transformation for all widgets with dates
   const handleGranularityChange = useCallback(async (gran: DashboardGranularity) => {
     setGranularity(gran)
+    if (gran === 'original') {
+      setTabs(prev => prev.map(tab => ({
+        ...tab,
+        widgets: tab.widgets.map(w => ({
+          ...w,
+          data: w.original_data || w.data,
+          columns: w.original_columns || w.columns,
+          sql: w.original_sql || w.sql,
+        })),
+      })))
+      return
+    }
     setGranLoading(true)
     setTabs(prev => prev.map(tab => ({
       ...tab,
       widgets: tab.widgets.map(w => {
-        const origSql = w.original_sql || w.sql
-        if (!origSql || !origSql.match(/DATE_TRUNC/i)) return w
-        return { ...w, _pending: true } as any
+        const srcData = w.original_data || w.data
+        const srcCols = w.original_columns || w.columns
+        const transformed = transformDataGranularity(srcData, srcCols, gran)
+        if (transformed) {
+          return { ...w, data: transformed.data, columns: transformed.columns }
+        }
+        return w
       }),
     })))
-
-    // Process all tabs
-    const newTabs = await Promise.all(tabs.map(async tab => {
-      const newWidgets = await Promise.all(tab.widgets.map(async w => {
-        const origSql = w.original_sql || w.sql
-        if (!origSql || !origSql.match(/DATE_TRUNC/i)) return w
-        const transformed = transformSqlGranularity(origSql, gran)
-        try {
-          const res = await executeSql(transformed)
-          return { ...w, data: res.data, columns: res.columns, sql: transformed }
-        } catch {
-          return w
-        }
-      }))
-      return { ...tab, widgets: newWidgets }
-    }))
-    setTabs(newTabs)
     setGranLoading(false)
   }, [tabs])
 
-  // Check if any widget has DATE_TRUNC
-  const hasDateTruncWidgets = useMemo(() => {
-    return tabs.some(t => t.widgets.some(w => (w.original_sql || w.sql || '').match(/DATE_TRUNC/i)))
+  // Check if any widget has date-like data
+  const hasDateWidgets = useMemo(() => {
+    return tabs.some(t => t.widgets.some(w =>
+      hasDateData(w.original_data || w.data, w.original_columns || w.columns)
+    ))
   }, [tabs])
 
   // Dashboard-level variable filters
@@ -188,7 +193,12 @@ export default function DashboardView() {
     const activeFilters = dashFilters.filter(f => f.selected.length > 0 && f.selected.length < f.values.length)
     if (!activeFilters.length) {
       setTabs(prev => prev.map(tab => ({
-        ...tab, widgets: tab.widgets.map(w => w.original_sql ? { ...w, sql: w.original_sql } : w),
+        ...tab, widgets: tab.widgets.map(w => ({
+          ...w,
+          data: w.original_data || w.data,
+          columns: w.original_columns || w.columns,
+          sql: w.original_sql || w.sql,
+        })),
       })))
       return
     }
@@ -301,7 +311,7 @@ export default function DashboardView() {
       </div>
 
       {/* Granularity filter bar */}
-      {hasDateTruncWidgets && (
+      {hasDateWidgets && (
         <div className="flex items-center gap-2 mb-3 px-1">
           <Calendar size={14} className="text-[#6B7280]" />
           <span className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">Agrupar por:</span>
