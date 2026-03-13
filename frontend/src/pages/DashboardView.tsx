@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, Component, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle, Calendar, Filter, ChevronDown, Settings2 } from 'lucide-react'
+import { Pencil, Loader2, ArrowLeft, Info, X, ExternalLink, AlertTriangle, Calendar, Filter, ChevronDown, Settings2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { Responsive, WidthProvider } from 'react-grid-layout'
 import ChartWidget from '../components/ChartWidget'
 import KpiCard from '../components/KpiCard'
@@ -73,11 +73,11 @@ export default function DashboardView() {
 
   // Per-widget column overrides (local state, not persisted)
   const [widgetColumnOverrides, setWidgetColumnOverrides] = useState<
-    Record<string, { xColumn?: string; yColumns?: string[]; groupByColumn?: string }>
+    Record<string, { xColumn?: string; yColumns?: string[]; groupByColumn?: string; sortOrder?: 'none' | 'asc' | 'desc' }>
   >({})
   const [configOpenWidget, setConfigOpenWidget] = useState<string | null>(null)
 
-  const setWidgetOverride = (widgetId: string, key: 'xColumn' | 'yColumns' | 'groupByColumn', value: any) => {
+  const setWidgetOverride = (widgetId: string, key: 'xColumn' | 'yColumns' | 'groupByColumn' | 'sortOrder', value: any) => {
     setWidgetColumnOverrides(prev => ({
       ...prev,
       [widgetId]: { ...prev[widgetId], [key]: value },
@@ -572,6 +572,27 @@ export default function DashboardView() {
                                       ))}
                                     </select>
                                   </div>
+                                  {/* Sort order */}
+                                  <div className="min-w-0">
+                                    <label className="text-[9px] font-bold text-[#6B7280] uppercase tracking-wider block mb-0.5">Ordenar</label>
+                                    <div className="flex gap-0.5">
+                                      {([['none', ArrowUpDown, 'Original'], ['desc', ArrowDown, 'Mayor a menor'], ['asc', ArrowUp, 'Menor a mayor']] as const).map(([val, Icon, title]) => {
+                                        const curSort = ovr.sortOrder || 'none'
+                                        return (
+                                          <button key={val}
+                                            onClick={() => setWidgetOverride(w.grid_i, 'sortOrder', val)}
+                                            title={title}
+                                            className={`p-1 rounded border transition-all ${
+                                              curSort === val
+                                                ? 'border-[#1E88E5] bg-[#1E88E5]/10 text-[#1E88E5]'
+                                                : 'border-[#E5E7EB] bg-white text-[#9CA3AF] hover:border-[#1E88E5]/30'
+                                            }`}>
+                                            <Icon size={12} />
+                                          </button>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             )
@@ -588,11 +609,24 @@ export default function DashboardView() {
                                   color={w.kpi_color || PRIMARY_COLOR} delta={w.kpi_delta}
                                   kpiStyle={w.kpi_style || 'accent'} maxValue={w.kpi_max_value} />
                               </div>
-                            ) : w.data && w.data.length > 0 && w.columns && w.columns.length >= 2 ? (
+                            ) : w.data && w.data.length > 0 && w.columns && w.columns.length >= 2 ? (() => {
+                              const wOvr = widgetColumnOverrides[w.grid_i] || {}
+                              const sOrder = wOvr.sortOrder || 'none'
+                              let displayData = w.data.length > 500 ? w.data.slice(0, 500) : w.data
+                              if (sOrder !== 'none') {
+                                const xC = wOvr.xColumn || w.x_column || w.columns[0]
+                                const yC = wOvr.yColumns || w.y_columns || w.columns.filter((c: string) => c !== xC)
+                                displayData = [...displayData].sort((a, b) => {
+                                  const sumA = yC.reduce((s: number, c: string) => s + (Number(a[c]) || 0), 0)
+                                  const sumB = yC.reduce((s: number, c: string) => s + (Number(b[c]) || 0), 0)
+                                  return sOrder === 'asc' ? sumA - sumB : sumB - sumA
+                                })
+                              }
+                              return (
                               <div className="flex-1" style={{ position: 'relative', minHeight: 0 }}>
                                 <div style={{ position: 'absolute', inset: 4 }}>
                                   <ChartWidget
-                                    data={w.data.length > 500 ? w.data.slice(0, 500) : w.data}
+                                    data={displayData}
                                     columns={w.columns}
                                     chartType={(w.chart_type || w.type || 'bar') as ChartType}
                                     fillContainer
@@ -606,7 +640,8 @@ export default function DashboardView() {
                                     groupByColumn={widgetColumnOverrides[w.grid_i]?.groupByColumn ?? w.group_by_column} />
                                 </div>
                               </div>
-                            ) : w.data && w.data.length > 0 ? (
+                              )
+                            })() : w.data && w.data.length > 0 ? (
                               <div className="flex-1 text-xs overflow-auto p-2">
                                 <table className="w-full">
                                   <thead><tr style={{ backgroundColor: textColor === '#FFFFFF' ? 'rgba(255,255,255,0.1)' : '#F9FAFB' }}>
